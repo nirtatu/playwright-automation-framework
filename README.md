@@ -1,5 +1,7 @@
 # Playwright Automation Framework
 
+[![Playwright Tests](https://github.com/nirtatu/playwright-automation-framework/actions/workflows/playwright.yml/badge.svg?branch=main)](https://github.com/nirtatu/playwright-automation-framework/actions/workflows/playwright.yml)
+
 UI and API test automation framework built with [Playwright Test](https://playwright.dev) and TypeScript.
 
 **Application under test:** [Restful Booker Platform](https://automationintesting.online). It is a public demo hotel-booking app with a UI and a REST API.
@@ -9,7 +11,7 @@ UI and API test automation framework built with [Playwright Test](https://playwr
 | Phase | State |
 |---|---|
 | 1. Walking skeleton | Implemented: TypeScript setup, one API test and one UI test, validated locally |
-| 2. Basic CI | Implemented: GitHub Actions workflow (`.github/workflows/playwright.yml`), validated locally. Not yet verified on GitHub |
+| 2. Basic CI | Implemented: GitHub Actions workflow (`.github/workflows/playwright.yml`) runs the type check and both tests on pushes and pull requests to `main`. Verified on GitHub |
 | 3+ | Not implemented yet |
 
 ## Prerequisites
