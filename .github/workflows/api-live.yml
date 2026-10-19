@@ -1,0 +1,65 @@
+name: API Tests (live, manual only)
+
+# Runs the API suite against the live public test site. These tests send real requests and
+# CREATE AND DELETE BOOKINGS there, so the workflow has no automatic triggers: start it
+# deliberately from the Actions tab ("Run workflow").
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Only one live run at a time, and never cancel one mid-run: cancelling skips the test
+# teardown that deletes the bookings the run created.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  api-tests:
+    name: Type check and API tests (live site)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # No browser install: the api project uses only Playwright's request context.
+
+      - name: Type check
+        run: npm run typecheck
+
+      # Workers (1), retries and reporters come from playwright.config.ts. Admin credentials
+      # default to the public demo values in src/config/env.ts; no secrets are used.
+      - name: Run API tests
+        run: npm run test:api
+
+      - name: Upload HTML report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: api-playwright-report
+          path: playwright-report/
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload test results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: api-test-results
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 14

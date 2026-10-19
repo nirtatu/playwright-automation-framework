@@ -43,8 +43,13 @@ jobs:
 
       # Workers (1), retries and reporters come from playwright.config.ts,
       # which switches to CI behaviour via the CI variable GitHub Actions sets.
-      - name: Run Playwright tests
-        run: npm test
+      # Allowlist: UI tests plus the read-only rooms API test. The auth and booking API specs
+      # create and delete bookings on the live site, so they run only in the manual
+      # "API Tests (live, manual only)" workflow (api-live.yml). New API specs must be added here
+      # explicitly to run on every push and pull request; new UI specs under tests/ui/ are
+      # included automatically.
+      - name: Run UI and read-only API tests
+        run: npm test -- tests/ui/ tests/api/rooms.spec.ts
 
       - name: Upload HTML report
         if: ${{ !cancelled() }}
