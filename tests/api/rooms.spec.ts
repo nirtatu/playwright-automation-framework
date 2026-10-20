@@ -1,9 +1,10 @@
 import { test, expect } from '@playwright/test';
-import { expectStatus, send } from '../../src/api/http';
+import { expectStatus } from '../../src/api/http';
+import { listRooms } from '../../src/api/room-api';
 
 test.describe('Rooms API', () => {
   test('GET /api/room returns a list of rooms', async ({ request }) => {
-    const response = await send('GET /api/room', () => request.get('/api/room'));
+    const response = await listRooms(request);
 
     await expectStatus(response, 200);
 

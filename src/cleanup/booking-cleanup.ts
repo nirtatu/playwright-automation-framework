@@ -240,11 +240,12 @@ async function deleteOwned(
   warn: (message: string) => void,
   retry: { done: boolean; priorDeleteStatus?: number } = { done: false },
 ): Promise<void> {
+  const who = `#${id} (${marker})`;
   const check = await session.api.get(id);
   if (check.status() === 404) {
     if (retry.priorDeleteStatus !== undefined) {
       warn(
-        `#${id} (${marker}): DELETE returned ${retry.priorDeleteStatus}, booking now not found; deletion by this test unconfirmed`,
+        `${who}: DELETE returned ${retry.priorDeleteStatus}, booking now not found; deletion by this test unconfirmed`,
       );
     }
     return; // Already gone: deleted by the test itself or by an environment reset.
@@ -253,7 +254,7 @@ async function deleteOwned(
     if (!retry.done && (await session.recoverAuth(check.status()))) {
       return deleteOwned(session, id, marker, warn, { done: true });
     }
-    warn(`#${id} (${marker}): ownership check returned ${check.status()}; not deleted`);
+    warn(`${who}: ownership check returned ${check.status()}; not deleted`);
     return;
   }
   const found = ((await check.json()) as { lastname?: unknown }).lastname;
@@ -269,13 +270,9 @@ async function deleteOwned(
   }
   const after = await session.api.get(id);
   if (after.status() !== 404) {
-    warn(
-      `#${id} (${marker}): DELETE returned ${deletion.status()}, follow-up GET ${after.status()}; deletion unconfirmed`,
-    );
+    warn(`${who}: DELETE returned ${deletion.status()}, follow-up GET ${after.status()}; deletion unconfirmed`);
   } else if (!deletion.ok()) {
-    warn(
-      `#${id} (${marker}): DELETE returned ${deletion.status()}, booking now not found; deletion by this test unconfirmed`,
-    );
+    warn(`${who}: DELETE returned ${deletion.status()}, booking now not found; deletion by this test unconfirmed`);
   }
 }
 

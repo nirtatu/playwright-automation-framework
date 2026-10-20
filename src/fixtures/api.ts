@@ -1,7 +1,8 @@
 import { test as base, expect, type APIResponse } from '@playwright/test';
 import { login, validateToken } from '../api/auth-api';
 import { BookingApi } from '../api/booking-api';
-import { expectStatus, send } from '../api/http';
+import { expectStatus } from '../api/http';
+import { listRooms, type Room } from '../api/room-api';
 import { createBookingTracker } from '../cleanup/booking-cleanup';
 import { cleanupWarningLine } from '../cleanup/warning-output';
 import { adminCredentials } from '../config/env';
@@ -40,9 +41,10 @@ export const test = base.extend<ApiFixtures>({
   },
 
   slot: async ({ request, bookingApi }, use) => {
-    const rooms = await send('GET /api/room', () => request.get('/api/room'));
-    await expectStatus(rooms, 200, 'setup: list rooms');
-    const roomIds: number[] = (await rooms.json()).rooms.map((room: { roomid: number }) => room.roomid);
+    const response = await listRooms(request);
+    await expectStatus(response, 200, 'setup: list rooms');
+    const { rooms }: { rooms: Room[] } = await response.json();
+    const roomIds = rooms.map((room) => room.roomid);
     expect(roomIds.length, '[setup] at least one room exists').toBeGreaterThan(0);
     const roomid = roomIds[Math.floor(Math.random() * roomIds.length)]!;
 
