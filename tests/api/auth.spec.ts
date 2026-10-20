@@ -18,7 +18,9 @@ test.describe('Auth API', () => {
 
     await expectStatus(response, 401);
     const body = await response.json();
-    expect(body).toMatchObject({ error: 'Invalid credentials' });
-    expect(body).not.toHaveProperty('token');
+    // Assert on the field and on the keys, not the whole body: if a token were ever returned here,
+    // a failure message must not print its value.
+    expect(body.error).toBe('Invalid credentials');
+    expect(Object.keys(body), 'a rejected login must not return a token').not.toContain('token');
   });
 });

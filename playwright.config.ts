@@ -38,6 +38,9 @@ export default defineConfig({
       // API specs use only the `request` fixture, so no browser is launched.
       name: 'api',
       testDir: './tests/api',
+      // Traces of request contexts record request headers and bodies (admin login, token cookies),
+      // so API tests are never traced. Other projects keep the global trace setting.
+      use: { trace: 'off' },
     },
     {
       name: 'chromium',

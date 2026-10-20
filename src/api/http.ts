@@ -1,9 +1,15 @@
 import { expect, type APIResponse } from '@playwright/test';
+import { redactError, redact } from '../security/redaction';
 
-/** No HTTP response was received at all (DNS, connection reset, timeout). */
+/**
+ * No HTTP response was received at all (DNS, connection reset, timeout). Playwright's error includes
+ * a call log with every request header (e.g. `cookie: token=…`), so both the message and the
+ * attached cause are redacted copies. Method, URL and error type stay visible.
+ */
 export class TransportError extends Error {
   constructor(description: string, cause: unknown) {
-    super(`[transport] ${description}: ${cause instanceof Error ? cause.message : String(cause)}`, { cause });
+    const safeCause = redactError(cause);
+    super(`[transport] ${description}: ${safeCause.message}`, { cause: safeCause });
     this.name = 'TransportError';
   }
 }
@@ -28,7 +34,8 @@ export async function expectStatus(response: APIResponse, expected: number, cont
   const status = response.status();
   if (status === expected) return;
   const kind = INFRASTRUCTURE_STATUSES.has(status) ? 'infrastructure' : 'contract';
-  const body = (await response.text().catch(() => '<unreadable body>')).slice(0, 500);
+  // Redacted after truncation: an unexpected success (e.g. a login) could return a token.
+  const body = redact((await response.text().catch(() => '<unreadable body>')).slice(0, 500));
   const where = context ? ` (${context})` : '';
   expect(status, `[${kind}]${where} ${response.url()}: expected ${expected}, got ${status}. Body: ${body}`).toBe(
     expected,

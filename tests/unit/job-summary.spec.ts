@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
-import { redact, renderSummary, type SummaryTest } from '../../src/reporting/job-summary-reporter';
+import { renderSummary, type SummaryTest } from '../../src/reporting/job-summary-reporter';
+import { redact } from '../../src/security/redaction';
 
 // Offline tests for the GitHub Actions job summary: pure string rendering, no files or network.
 

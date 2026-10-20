@@ -33,7 +33,7 @@ export default defineConfig(
   // Offline guarantee for the unit project: the code it covers and the unit tests themselves
   // must not reach an HTTP client, Playwright fixtures or environment config.
   {
-    files: ['src/cleanup/**/*.ts', 'src/data/**/*.ts'],
+    files: ['src/cleanup/**/*.ts', 'src/data/**/*.ts', 'src/security/**/*.ts'],
     rules: {
       'no-restricted-imports': [
         'error',
@@ -59,7 +59,9 @@ export default defineConfig(
               message: 'Unit tests must stay offline: inject fakes instead.',
             },
           ],
-          patterns: [{ group: ['**/api/*', '**/fixtures/*', '**/config/*'], message: OFFLINE_MESSAGE }],
+          // One exception: src/api/http.ts (send, expectStatus, TransportError) has no network side
+          // effects on import, so its redaction can be tested offline. Other API clients stay banned.
+          patterns: [{ group: ['**/api/*', '!**/api/http', '**/fixtures/*', '**/config/*'], message: OFFLINE_MESSAGE }],
         },
       ],
       'no-restricted-syntax': [

@@ -1,6 +1,6 @@
 import { appendFileSync } from 'node:fs';
-import { stripVTControlCharacters } from 'node:util';
 import type { FullResult, Reporter, Suite, TestCase } from '@playwright/test/reporter';
+import { redact } from '../security/redaction';
 
 // GitHub Actions job summary: counts, duration, failed and flaky tests, and cleanup warnings.
 // Registered only on GitHub Actions (playwright.config.ts) and writes only when
@@ -56,18 +56,6 @@ function describeTest(test: SummaryTest): string[] {
     lines.push('', '  ~~~', ...excerpt.map((line) => `  ${line}`), '  ~~~');
   }
   return lines;
-}
-
-// Error messages can include response bodies and headers. Never let credentials through.
-export function redact(text: string): string {
-  return (
-    stripVTControlCharacters(text) // ANSI colour and control sequences from Playwright errors
-      // Masks up to the closing quote, a line break or the end of the text, so a value cut off by
-      // truncation (e.g. the 500-character body excerpt) is still hidden.
-      .replace(/("(?:token|password)"\s*:\s*")[^"\n]*/gi, '$1<redacted>')
-      .replace(/(\btoken=)[^;\s"&]+/gi, '$1<redacted>')
-      .replace(/(\b(?:cookie|authorization)\s*:\s*)[^\n]+/gi, '$1<redacted>')
-  );
 }
 
 export default class JobSummaryReporter implements Reporter {
