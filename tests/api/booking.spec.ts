@@ -1,4 +1,5 @@
 import { test, expect, type CreateBooking } from '../../src/fixtures/api';
+import type { BookingApi } from '../../src/api/booking-api';
 import { expectStatus, send } from '../../src/api/http';
 import { addDays, buildBooking, type Booking, type CreatedBooking } from '../../src/data/booking-data';
 
@@ -9,6 +10,17 @@ async function createValidBooking(createBooking: CreateBooking, booking: Booking
   const response = await createBooking(booking);
   await expectStatus(response, 201, 'arrange: create booking');
   return response.json();
+}
+
+// In-test writes use the id from this test's own create response. Re-read it first: if an
+// environment reset reused the id for someone else's booking, fail instead of writing to it.
+async function expectStillOwned(bookingApi: BookingApi, bookingid: number, marker: string): Promise<void> {
+  const response = await bookingApi.get(bookingid);
+  await expectStatus(response, 200, 'ownership check before write');
+  const { lastname } = await response.json();
+  expect(lastname, `[ownership] booking #${bookingid} must still carry this test's marker before it is changed`).toBe(
+    marker,
+  );
 }
 
 test.describe('Booking API', () => {
@@ -40,6 +52,7 @@ test.describe('Booking API', () => {
       bookingdates: { checkin, checkout: addDays(checkin, 2) },
     };
 
+    await expectStillOwned(bookingApi, bookingid, original.lastname);
     const updateResponse = await bookingApi.update(bookingid, changes);
     await expectStatus(updateResponse, 200);
     expect(await updateResponse.json()).toMatchObject({ bookingid, booking: changes });
@@ -50,8 +63,10 @@ test.describe('Booking API', () => {
   });
 
   test('deletes a booking', async ({ slot, createBooking, bookingApi }) => {
-    const { bookingid } = await createValidBooking(createBooking, buildBooking(slot.roomid, slot.checkin));
+    const booking = buildBooking(slot.roomid, slot.checkin);
+    const { bookingid } = await createValidBooking(createBooking, booking);
 
+    await expectStillOwned(bookingApi, bookingid, booking.lastname);
     const deleteResponse = await bookingApi.delete(bookingid);
     await expectStatus(deleteResponse, 202);
 
@@ -122,7 +137,8 @@ test.describe('Booking API', () => {
     const booking = buildBooking(slot.roomid, slot.checkin);
     const { bookingid } = await createValidBooking(createBooking, booking);
 
-    // Deliberately sent without the token cookie.
+    // Ownership is checked with the token; the DELETE below is deliberately sent without it.
+    await expectStillOwned(bookingApi, bookingid, booking.lastname);
     const response = await send(`DELETE /api/booking/${bookingid} without token`, () =>
       request.delete(`/api/booking/${bookingid}`),
     );
