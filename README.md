@@ -169,7 +169,9 @@ The automatic workflow selects its tests by file path (`tests/unit/ tests/ui/ te
 
 On CI, Playwright adds its `github` reporter alongside `list` and `html`, which annotates failing and flaky tests on the run. Both workflows upload the HTML report and test results as artifacts.
 
-The lint and format steps, the unit tests in the automatic selection, the `github` reporter and the cleanup warning annotations are Phase 4 changes that have not been pushed or run on GitHub yet. The last verified automatic run (`39283100497`) ran the type check, the UI test and the read-only rooms API test.
+**Job summary.** On GitHub Actions, a small custom reporter (`src/reporting/job-summary-reporter.ts`) writes the run's job summary: passed, failed, flaky and skipped counts, duration, failed and flaky tests with a short error excerpt, any cleanup warnings, and a link to the run. Token, cookie, authorization and password values are redacted from the summary's excerpts; this redaction applies only to the job summary, not to the job log, the run's annotations or the uploaded artifacts. A final workflow step adds download links for the two ZIP artifacts; to view the HTML report, unzip it and run `npx playwright show-report <folder>`. Locally, the reporter is not registered and nothing changes. The job summary and artifact links have not run on GitHub yet.
+
+The Phase 4 workflow changes (lint and format steps, unit tests in the automatic selection, the `github` reporter) ran successfully on GitHub in run `39390200870`. The cleanup warning annotations have not been seen on GitHub yet, because the automatic workflow runs no write tests.
 
 ## Debugging
 

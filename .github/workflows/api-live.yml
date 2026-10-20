@@ -53,6 +53,7 @@ jobs:
         run: npm run test:api
 
       - name: Upload HTML report
+        id: upload-report
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v7
         with:
@@ -62,6 +63,7 @@ jobs:
           retention-days: 14
 
       - name: Upload test results
+        id: upload-results
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v7
         with:
@@ -69,3 +71,16 @@ jobs:
           path: test-results/
           if-no-files-found: ignore
           retention-days: 14
+
+      # Links to the ZIP artifacts uploaded above (URLs are empty if nothing was uploaded).
+      - name: Add artifact links to job summary
+        if: ${{ !cancelled() }}
+        env:
+          REPORT_URL: ${{ steps.upload-report.outputs.artifact-url }}
+          RESULTS_URL: ${{ steps.upload-results.outputs.artifact-url }}
+        run: |
+          {
+            if [ -n "$REPORT_URL" ] || [ -n "$RESULTS_URL" ]; then echo "### Downloads"; fi
+            if [ -n "$REPORT_URL" ]; then echo "- [HTML report (ZIP)]($REPORT_URL): unzip, then run \`npx playwright show-report <folder>\`"; fi
+            if [ -n "$RESULTS_URL" ]; then echo "- [Test results: traces, screenshots, videos (ZIP)]($RESULTS_URL)"; fi
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -1,6 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 
 const isCI = !!process.env.CI;
+const isGitHubActions = !!process.env.GITHUB_ACTIONS;
 
 export default defineConfig({
   // The target is a shared public environment that resets its data periodically.
@@ -15,7 +16,14 @@ export default defineConfig({
 
   // On CI the github reporter adds failure, flaky and summary annotations to the run. It prints
   // no test output, so `list` stays for the log (including cleanup-warning annotation lines).
-  reporter: isCI ? [['list'], ['github'], ['html', { open: 'never' }]] : [['list'], ['html', { open: 'never' }]],
+  // On GitHub Actions the job-summary reporter also writes the run's job summary.
+  // Locally this is just list + html.
+  reporter: [
+    ['list'],
+    ...(isCI ? [['github'] as const] : []),
+    ...(isGitHubActions ? [['./src/reporting/job-summary-reporter.ts'] as const] : []),
+    ['html', { open: 'never' }],
+  ],
 
   use: {
     baseURL: process.env.BASE_URL ?? 'https://automationintesting.online',
