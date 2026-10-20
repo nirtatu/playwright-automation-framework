@@ -104,14 +104,21 @@ test.describe('Booking API', () => {
 
     // The status is an observation, not part of the asserted contract: the live service has
     // answered both 500 and 403.
-    test.info().annotations.push({ type: 'observed-status', description: `unauthenticated GET returned ${response.status()}` });
+    test
+      .info()
+      .annotations.push({ type: 'observed-status', description: `unauthenticated GET returned ${response.status()}` });
     expect(response.ok(), 'unauthenticated read must not succeed').toBe(false);
     const body = await response.text();
     expect(body).not.toContain(booking.lastname);
     expect(body).not.toContain(booking.bookingdates.checkin);
   });
 
-  test('keeps a booking intact after an unauthenticated delete', async ({ slot, createBooking, bookingApi, request }) => {
+  test('keeps a booking intact after an unauthenticated delete', async ({
+    slot,
+    createBooking,
+    bookingApi,
+    request,
+  }) => {
     const booking = buildBooking(slot.roomid, slot.checkin);
     const { bookingid } = await createValidBooking(createBooking, booking);
 
@@ -120,7 +127,10 @@ test.describe('Booking API', () => {
       request.delete(`/api/booking/${bookingid}`),
     );
 
-    test.info().annotations.push({ type: 'observed-status', description: `unauthenticated DELETE returned ${response.status()}` });
+    test.info().annotations.push({
+      type: 'observed-status',
+      description: `unauthenticated DELETE returned ${response.status()}`,
+    });
     const readResponse = await bookingApi.get(bookingid);
     await expectStatus(readResponse, 200);
     expect(await readResponse.json()).toMatchObject({ ...booking, bookingid });

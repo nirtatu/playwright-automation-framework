@@ -30,5 +30,7 @@ export async function expectStatus(response: APIResponse, expected: number, cont
   const kind = INFRASTRUCTURE_STATUSES.has(status) ? 'infrastructure' : 'contract';
   const body = (await response.text().catch(() => '<unreadable body>')).slice(0, 500);
   const where = context ? ` (${context})` : '';
-  expect(status, `[${kind}]${where} ${response.url()}: expected ${expected}, got ${status}. Body: ${body}`).toBe(expected);
+  expect(status, `[${kind}]${where} ${response.url()}: expected ${expected}, got ${status}. Body: ${body}`).toBe(
+    expected,
+  );
 }

@@ -13,7 +13,9 @@ export default defineConfig({
   timeout: 30_000,
   expect: { timeout: 10_000 },
 
-  reporter: [['list'], ['html', { open: 'never' }]],
+  // On CI the github reporter adds failure, flaky and summary annotations to the run. It prints
+  // no test output, so `list` stays for the log (including cleanup-warning annotation lines).
+  reporter: isCI ? [['list'], ['github'], ['html', { open: 'never' }]] : [['list'], ['html', { open: 'never' }]],
 
   use: {
     baseURL: process.env.BASE_URL ?? 'https://automationintesting.online',
@@ -33,6 +35,11 @@ export default defineConfig({
       name: 'chromium',
       testDir: './tests/ui',
       use: { ...devices['Desktop Chrome'] },
+    },
+    {
+      // Offline unit tests: injected fakes only, no fixtures and no HTTP (enforced by ESLint).
+      name: 'unit',
+      testDir: './tests/unit',
     },
   ],
 });

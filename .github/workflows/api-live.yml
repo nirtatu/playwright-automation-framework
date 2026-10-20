@@ -41,6 +41,12 @@ jobs:
       - name: Type check
         run: npm run typecheck
 
+      - name: Lint
+        run: npm run lint
+
+      - name: Check formatting
+        run: npm run format:check
+
       # Workers (1), retries and reporters come from playwright.config.ts. Admin credentials
       # default to the public demo values in src/config/env.ts; no secrets are used.
       - name: Run API tests

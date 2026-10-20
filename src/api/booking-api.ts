@@ -36,6 +36,8 @@ export class BookingApi {
   }
 
   delete(id: number): Promise<APIResponse> {
-    return send(`DELETE /api/booking/${id}`, () => this.request.delete(`/api/booking/${id}`, { headers: this.headers }));
+    return send(`DELETE /api/booking/${id}`, () =>
+      this.request.delete(`/api/booking/${id}`, { headers: this.headers }),
+    );
   }
 }

@@ -28,6 +28,31 @@ export function addDays(isoDate: string, days: number): string {
   return date.toISOString().slice(0, 10);
 }
 
+// Tests place every booking inside this window, so they never collide with existing data.
+export const SLOT_WINDOW_DAYS = 30;
+
+/**
+ * First day of a SLOT_WINDOW_DAYS window, 2–12 years ahead, that overlaps none of `bookings`,
+ * or undefined after 20 random tries. `today` and `random` are injectable for unit tests.
+ */
+export function findFreeWindow(
+  bookings: CreatedBooking[],
+  {
+    today = new Date().toISOString().slice(0, 10),
+    random = Math.random,
+  }: { today?: string; random?: () => number } = {},
+): string | undefined {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const start = addDays(today, 730 + Math.floor(random() * 3650)); // 2–12 years ahead
+    const end = addDays(start, SLOT_WINDOW_DAYS);
+    // ISO dates compare correctly as strings. Back-to-back stays do not clash under the API's
+    // overlap rule; the spare day before the window is a deliberate extra margin.
+    const clash = bookings.some((b) => b.bookingdates.checkin <= end && b.bookingdates.checkout >= addDays(start, -1));
+    if (!clash) return start;
+  }
+  return undefined;
+}
+
 /**
  * A valid two-night booking with a fresh marker. Never add email and phone: when both are
  * present the application also posts a message to the shared admin inbox.

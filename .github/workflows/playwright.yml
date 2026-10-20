@@ -41,15 +41,21 @@ jobs:
       - name: Type check
         run: npm run typecheck
 
+      - name: Lint
+        run: npm run lint
+
+      - name: Check formatting
+        run: npm run format:check
+
       # Workers (1), retries and reporters come from playwright.config.ts,
       # which switches to CI behaviour via the CI variable GitHub Actions sets.
-      # Allowlist: UI tests plus the read-only rooms API test. The auth and booking API specs
+      # Allowlist: offline unit tests, UI tests and the read-only rooms API test. The auth and booking API specs
       # create and delete bookings on the live site, so they run only in the manual
       # "API Tests (live, manual only)" workflow (api-live.yml). New API specs must be added here
       # explicitly to run on every push and pull request; new UI specs under tests/ui/ are
       # included automatically.
-      - name: Run UI and read-only API tests
-        run: npm test -- tests/ui/ tests/api/rooms.spec.ts
+      - name: Run unit, UI and read-only API tests
+        run: npm test -- tests/unit/ tests/ui/ tests/api/rooms.spec.ts
 
       - name: Upload HTML report
         if: ${{ !cancelled() }}

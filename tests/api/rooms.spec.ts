@@ -1,10 +1,11 @@
 import { test, expect } from '@playwright/test';
+import { expectStatus, send } from '../../src/api/http';
 
 test.describe('Rooms API', () => {
   test('GET /api/room returns a list of rooms', async ({ request }) => {
-    const response = await request.get('/api/room');
+    const response = await send('GET /api/room', () => request.get('/api/room'));
 
-    expect(response.status()).toBe(200);
+    await expectStatus(response, 200);
 
     const body = await response.json();
     // The public data resets periodically, so assert on shape, not on specific rooms.
