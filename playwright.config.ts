@@ -11,6 +11,9 @@ export default defineConfig({
   forbidOnly: isCI,
   retries: isCI ? 1 : 0,
 
+  // The HTML report shows commit info but no source diff, since the report may be published.
+  captureGitInfo: { commit: true, diff: false },
+
   timeout: 30_000,
   expect: { timeout: 10_000 },
 

@@ -33,7 +33,7 @@ export default defineConfig(
   // Offline guarantee for the unit project: the code it covers and the unit tests themselves
   // must not reach an HTTP client, Playwright fixtures or environment config.
   {
-    files: ['src/cleanup/**/*.ts', 'src/data/**/*.ts', 'src/security/**/*.ts'],
+    files: ['src/cleanup/**/*.ts', 'src/data/**/*.ts', 'src/security/**/*.ts', 'scripts/**/*.ts'],
     rules: {
       'no-restricted-imports': [
         'error',

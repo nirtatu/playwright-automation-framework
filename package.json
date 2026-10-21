@@ -16,7 +16,8 @@
     "lint": "eslint . --max-warnings=0",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "report": "playwright show-report"
+    "report": "playwright show-report",
+    "report:scan": "node --experimental-strip-types --no-warnings scripts/report-scan-cli.ts playwright-report"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

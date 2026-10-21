@@ -19,6 +19,9 @@ jobs:
     name: Type check and test
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # "passed" only when the report scan ran and found nothing; empty or "blocked" otherwise.
+    outputs:
+      report_scan: ${{ steps.scan.outputs.result }}
 
     steps:
       - name: Check out repository
@@ -56,6 +59,10 @@ jobs:
       # included automatically.
       - name: Run unit, UI and read-only API tests
         run: npm test -- tests/unit/ tests/ui/ tests/api/rooms.spec.ts
+        env:
+          # The report may be published (GitHub Pages): leave out per-step source snippets, which
+          # include test source code such as the fake secrets used by the redaction unit tests.
+          PLAYWRIGHT_HTML_NO_SNIPPETS: 'true'
 
       - name: Upload HTML report
         id: upload-report
@@ -89,3 +96,58 @@ jobs:
             if [ -n "$REPORT_URL" ]; then echo "- [HTML report (ZIP)]($REPORT_URL): unzip, then run \`npx playwright show-report <folder>\`"; fi
             if [ -n "$RESULTS_URL" ]; then echo "- [Test results: traces, screenshots, videos (ZIP)]($RESULTS_URL)"; fi
           } >> "$GITHUB_STEP_SUMMARY"
+
+      # GitHub Pages: only reports from successful pushes to main are published, and only after the
+      # content scan passes. Pull requests and failed runs never reach these steps.
+      # The scan decides publication only: a blocked scan does not fail the test job (its tests
+      # passed), but it records result=blocked, so neither the upload nor the deploy job runs.
+      # Any non-zero exit (finding, scan error, crash, missing report) counts as blocked.
+      - name: Scan report before publishing
+        id: scan
+        if: ${{ success() && github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+        run: |
+          if npm run report:scan; then
+            echo "result=passed" >> "$GITHUB_OUTPUT"
+          else
+            echo "result=blocked" >> "$GITHUB_OUTPUT"
+            echo "::warning title=HTML report not published::The pre-publication report scan did not pass. See this step's log (values are never printed)."
+            echo "### HTML report not published: the pre-publication scan did not pass (see the scan step's log)" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload report for GitHub Pages
+        if: ${{ success() && steps.scan.outputs.result == 'passed' }}
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: playwright-report/
+          retention-days: 1
+
+  deploy-report:
+    name: Publish HTML report to GitHub Pages
+    needs: test
+    # All three are required: a successful test job, a push to main, and a passed report scan.
+    if: >-
+      ${{ needs.test.result == 'success' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+      && needs.test.outputs.report_scan == 'passed' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Only this job can deploy; the test job keeps the read-only token.
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v5
+
+      - name: Add report link to job summary
+        env:
+          PAGE_URL: ${{ steps.deploy.outputs.page_url }}
+        run: |
+          echo "### Latest HTML report: [$PAGE_URL]($PAGE_URL)" >> "$GITHUB_STEP_SUMMARY"
