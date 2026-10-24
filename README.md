@@ -103,8 +103,9 @@ scripts/
 tests/
   api/                        auth.spec.ts, booking.spec.ts (write to the target), rooms.spec.ts (read-only)
   ui/                         home.spec.ts (read-only)
-  unit/                       booking-cleanup, http-redaction, job-summary, redaction,
-                              report-scan and warning-output specs (offline)
+  unit/                       booking-cleanup, booking-data, http-redaction, job-summary, redaction,
+                              report-scan and warning-output specs (offline); support/ holds the
+                              report scanner's synthetic report builders
 playwright.config.ts          projects: api, chromium, unit
 eslint.config.mjs, .prettierrc, .prettierignore, tsconfig.json
 ```
