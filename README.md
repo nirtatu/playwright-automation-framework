@@ -47,7 +47,8 @@ tests/api, tests/ui            specs: assert application behaviour through fixtu
 src/fixtures/api.ts            fixtures: adminToken, bookingApi, slot (free room/date window), createBooking
         │
         ├── src/api/           API clients: send each request once, return raw responses
-        │                      (send/expectStatus label failures as transport, infrastructure or contract)
+        │                      (send/expectStatus label failures as transport, infrastructure or contract),
+        │                      plus booking-checks.ts: assertion helpers shared by the booking specs
         ├── src/data/          booking types, builders, unique markers, free-window search
         └── src/cleanup/       cleanup engine: create tracking, ownership-checked delete, recovery
                                (depends only on injected interfaces, no Playwright or HTTP imports)
@@ -61,7 +62,7 @@ tests/unit                     offline unit tests for the modules above: in-memo
                                report-scanner tests that run nested Playwright and CLI processes locally
 ```
 
-- **API clients** (`src/api/`) wrap Playwright's request context and contain no assertions; specs decide what a status means. `expectStatus` labels a wrong status as `[infrastructure]` (502, 503, 504) or `[contract]` (anything else), and `send` turns a request with no response into a `TransportError`, so a report shows which kind of failure occurred.
+- **API clients** (`src/api/*-api.ts`) wrap Playwright's request context, send each request once and return the raw response without asserting; specs decide what a status means. Assertions live in the specs and in shared helpers: `src/api/booking-checks.ts` holds booking assertion helpers (`createValidBooking`, and `expectStillOwned`, the ownership check before an in-test write), and `expectStatus` (`src/api/http.ts`) labels a wrong status as `[infrastructure]` (502, 503, 504) or `[contract]` (anything else), and `send` turns a request with no response into a `TransportError`, so a report shows which kind of failure occurred.
 - **Fixtures** (`src/fixtures/api.ts`) wire the layers together: a fresh admin token per test, a room and date window checked free of existing bookings, and a `createBooking` function whose bookings are cleaned up in teardown.
 - **Cleanup engine** (`src/cleanup/booking-cleanup.ts`) holds every safety rule for test data. The fixture adapts the real API clients to its small interfaces; the unit tests pass fakes instead.
 - **Offline unit tests are enforced, not just intended.** ESLint forbids `src/cleanup`, `src/data`, `src/security`, `scripts` and `tests/unit` from importing the API clients, fixtures or environment config, and forbids unit tests from using the `request`, `page`, `context`, `browser` or `playwright` fixtures. The one exception is `src/api/http.ts`, whose redaction is unit-tested and which makes no requests on import.
@@ -88,7 +89,8 @@ tests/unit                     offline unit tests for the modules above: in-memo
   playwright.yml              automatic: pushes and PRs to main; read-only tests; publishes the report
   api-live.yml                manual only: full API suite, writes to the target
 src/
-  api/                        auth-api.ts, booking-api.ts, room-api.ts, http.ts (send, expectStatus)
+  api/                        auth-api.ts, booking-api.ts, room-api.ts (clients), http.ts (send, expectStatus),
+                              booking-checks.ts (booking assertion helpers)
   cleanup/                    booking-cleanup.ts (tracking and cleanup), warning-output.ts
   config/env.ts               admin credentials from environment variables
   data/booking-data.ts        booking types, builders, unique markers, free-window search
@@ -134,19 +136,35 @@ npm run test:ui
 
 ### Commands
 
-**Safe to run any time (no writes to the target):**
+**Offline checks (no requests to `BASE_URL`):**
 
 | Command | What it does |
 |---|---|
 | `npm run typecheck` | Type-check the project |
 | `npm run lint` | ESLint, including type-aware and Playwright rules (zero warnings allowed) |
 | `npm run format:check` | Check Prettier formatting (`npm run format` applies it) |
-| `npm run test:unit` | Offline unit tests (one needs Chromium installed) |
-| `npm run test:ui` | UI tests in Chromium (read-only) |
-| `npm test -- tests/unit/ tests/ui/ tests/api/rooms.spec.ts` | The automatic CI test selection |
-| `npx playwright test --list` | List all tests without running them |
-| `npm run report` | Open the last HTML report |
+| `npm run test:unit` | Offline unit tests. A few report-scanner tests start nested Playwright runs and the scanner CLI as local processes; one needs Chromium installed and builds its page with `setContent`, aborting every request |
+| `npx playwright test --list` | List all tests without running them; add `--grep` or `--grep-invert` to preview what a tag filter selects |
+| `npm run report` | Open the last HTML report locally |
 | `npm run report:scan` | Scan `playwright-report/` for credential patterns (exit code 0 = clean) |
+
+**Contacts the live site, read-only (requests to `BASE_URL`, no booking data written):**
+
+| Command | What it does |
+|---|---|
+| `npm run test:ui` | UI tests in Chromium. They load the live page and the rooms it requests, so they are not offline |
+| `npm test -- tests/unit/ tests/ui/ tests/api/rooms.spec.ts` | The automatic CI test selection: the offline unit tests plus the live UI tests and the live rooms API test |
+
+The API specs differ in what they do on the live service. `tests/api/rooms.spec.ts` (`GET /api/room`) and `tests/api/auth.spec.ts` (admin login, a `POST` that changes no booking data) contact it without writing booking data. `tests/api/booking.spec.ts` creates, updates and deletes bookings; the commands that run it are listed under "Writes to the configured target" below.
+
+**Test tags.** `@live` marks tests that contact the live target; `@writes` marks tests that create, update or delete booking data on the configured target. Preview a selection with `--list` before running it:
+
+| Command | What it lists |
+|---|---|
+| `npx playwright test --list --grep @writes` | Tests that create, update or delete booking data (currently the booking API tests) |
+| `npx playwright test --list --grep-invert @live` | Tests not tagged `@live`. Currently `tests/ui/home.spec.ts` is untagged, so this includes that live UI test alongside the unit tests: it is **not** an offline selection |
+
+Tags are filters, not runtime safety guards: they only decide which tests a command selects, and a filter is only reliable when every relevant test is correctly tagged. An untagged test is silently included by `--grep-invert`. Likewise, `--grep-invert @writes` leaves out the tagged write tests but still runs the live read-only tests (UI, rooms and auth API), so it is not an offline selection either. For an offline run, use `npm run test:unit`.
 
 **Writes to the configured target:**
 

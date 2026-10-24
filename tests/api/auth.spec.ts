@@ -3,7 +3,7 @@ import { login } from '../../src/api/auth-api';
 import { expectStatus } from '../../src/api/http';
 import { adminCredentials } from '../../src/config/env';
 
-test.describe('Auth API', () => {
+test.describe('Auth API', { tag: '@live' }, () => {
   test('login with valid credentials returns a token', async ({ request }) => {
     const response = await login(request, adminCredentials);
 

@@ -1,27 +1,11 @@
-import { test, expect, type CreateBooking } from '../../src/fixtures/api';
-import type { BookingApi } from '../../src/api/booking-api';
+import { test, expect } from '../../src/fixtures/api';
+import { createValidBooking, expectStillOwned } from '../../src/api/booking-checks';
 import { expectStatus, send } from '../../src/api/http';
 import { addDays, buildBooking, type Booking, type CreatedBooking } from '../../src/data/booking-data';
 
 // Every booking is created through the `createBooking` fixture, which cleans it up afterwards,
 // and placed inside `slot`: a room and date window verified free of existing bookings.
-
-async function createValidBooking(createBooking: CreateBooking, booking: Booking): Promise<CreatedBooking> {
-  const response = await createBooking(booking);
-  await expectStatus(response, 201, 'arrange: create booking');
-  return response.json();
-}
-
-// In-test writes use the id from this test's own create response. Re-read it first: if an
-// environment reset reused the id for someone else's booking, fail instead of writing to it.
-async function expectStillOwned(bookingApi: BookingApi, bookingid: number, marker: string): Promise<void> {
-  const response = await bookingApi.get(bookingid);
-  await expectStatus(response, 200, 'ownership check before write');
-  const { lastname } = await response.json();
-  expect(lastname, `[ownership] booking #${bookingid} must still carry this test's marker before it is changed`).toBe(
-    marker,
-  );
-}
+// In-test writes are ownership-checked first (`expectStillOwned`, src/api/booking-checks.ts).
 
 // Statuses of unauthenticated requests are recorded as observations, not asserted: the live
 // service has answered both 500 and 403.
@@ -29,24 +13,30 @@ function recordObservedStatus(request: string, status: number): void {
   test.info().annotations.push({ type: 'observed-status', description: `${request} returned ${status}` });
 }
 
-test.describe('Booking API', () => {
+test.describe('Booking API', { tag: ['@live', '@writes'] }, () => {
   test('creates a booking and reads it back', async ({ slot, createBooking, bookingApi }) => {
     const booking = buildBooking(slot.roomid, slot.checkin);
 
-    const createResponse = await createBooking(booking);
-    await expectStatus(createResponse, 201);
-    const created: CreatedBooking = await createResponse.json();
-    expect(created).toMatchObject(booking);
-    expect(Number.isInteger(created.bookingid) && created.bookingid > 0).toBe(true);
+    const created = await test.step('Act: create booking', async () => {
+      const createResponse = await createBooking(booking);
+      await expectStatus(createResponse, 201);
+      const createdBooking: CreatedBooking = await createResponse.json();
+      expect(createdBooking).toMatchObject(booking);
+      expect(Number.isInteger(createdBooking.bookingid) && createdBooking.bookingid > 0).toBe(true);
+      return createdBooking;
+    });
 
-    const readResponse = await bookingApi.get(created.bookingid);
-    await expectStatus(readResponse, 200);
-    expect(await readResponse.json()).toMatchObject({ ...booking, bookingid: created.bookingid });
+    await test.step('Verify: booking is read back unchanged', async () => {
+      const readResponse = await bookingApi.get(created.bookingid);
+      await expectStatus(readResponse, 200);
+      expect(await readResponse.json()).toMatchObject({ ...booking, bookingid: created.bookingid });
+    });
   });
 
   test('updates a booking', async ({ slot, createBooking, bookingApi }) => {
     const original = buildBooking(slot.roomid, slot.checkin);
-    const { bookingid } = await createValidBooking(createBooking, original);
+
+    const { bookingid } = await test.step('Arrange: create booking', () => createValidBooking(createBooking, original));
 
     // The last name (ownership marker) is kept. New dates stay inside the free slot and do not
     // overlap the original stay, which the API could reject as a conflict with itself.
@@ -58,26 +48,39 @@ test.describe('Booking API', () => {
       bookingdates: { checkin, checkout: addDays(checkin, 2) },
     };
 
-    await expectStillOwned(bookingApi, bookingid, original.lastname);
-    const updateResponse = await bookingApi.update(bookingid, changes);
-    await expectStatus(updateResponse, 200);
-    expect(await updateResponse.json()).toMatchObject({ bookingid, booking: changes });
+    await test.step('Verify: booking is still owned by this test', () =>
+      expectStillOwned(bookingApi, bookingid, original.lastname));
 
-    const readResponse = await bookingApi.get(bookingid);
-    await expectStatus(readResponse, 200);
-    expect(await readResponse.json()).toMatchObject({ ...changes, bookingid });
+    await test.step('Act: update booking', async () => {
+      const updateResponse = await bookingApi.update(bookingid, changes);
+      await expectStatus(updateResponse, 200);
+      expect(await updateResponse.json()).toMatchObject({ bookingid, booking: changes });
+    });
+
+    await test.step('Verify: updated booking is read back', async () => {
+      const readResponse = await bookingApi.get(bookingid);
+      await expectStatus(readResponse, 200);
+      expect(await readResponse.json()).toMatchObject({ ...changes, bookingid });
+    });
   });
 
   test('deletes a booking', async ({ slot, createBooking, bookingApi }) => {
     const booking = buildBooking(slot.roomid, slot.checkin);
-    const { bookingid } = await createValidBooking(createBooking, booking);
 
-    await expectStillOwned(bookingApi, bookingid, booking.lastname);
-    const deleteResponse = await bookingApi.delete(bookingid);
-    await expectStatus(deleteResponse, 202);
+    const { bookingid } = await test.step('Arrange: create booking', () => createValidBooking(createBooking, booking));
 
-    const readResponse = await bookingApi.get(bookingid);
-    await expectStatus(readResponse, 404);
+    await test.step('Verify: booking is still owned by this test', () =>
+      expectStillOwned(bookingApi, bookingid, booking.lastname));
+
+    await test.step('Act: delete booking', async () => {
+      const deleteResponse = await bookingApi.delete(bookingid);
+      await expectStatus(deleteResponse, 202);
+    });
+
+    await test.step('Verify: booking is deleted', async () => {
+      const readResponse = await bookingApi.get(bookingid);
+      await expectStatus(readResponse, 404);
+    });
   });
 
   test('rejects a booking without a first name', async ({ slot, createBooking }) => {
@@ -105,29 +108,38 @@ test.describe('Booking API', () => {
 
   test('rejects a booking that overlaps an existing booking for the same room', async ({ slot, createBooking }) => {
     const first = buildBooking(slot.roomid, slot.checkin);
-    await createValidBooking(createBooking, first);
 
-    // Same room and dates, different marker. The only possible clash is with this test's booking.
-    const response = await createBooking(buildBooking(slot.roomid, slot.checkin));
+    await test.step('Arrange: create the first booking', () => createValidBooking(createBooking, first));
 
-    await expectStatus(response, 409);
-    expect(await response.json()).toMatchObject({ error: 'Failed to create booking' });
+    await test.step('Act: create an overlapping booking and verify it is rejected', async () => {
+      // Same room and dates, different marker. The only possible clash is with this test's booking.
+      const response = await createBooking(buildBooking(slot.roomid, slot.checkin));
+
+      await expectStatus(response, 409);
+      expect(await response.json()).toMatchObject({ error: 'Failed to create booking' });
+    });
   });
 
   test('does not expose a booking to an unauthenticated read', async ({ slot, createBooking, request }) => {
     const booking = buildBooking(slot.roomid, slot.checkin);
-    const { bookingid } = await createValidBooking(createBooking, booking);
 
-    // Deliberately sent without the token cookie.
-    const response = await send(`GET /api/booking/${bookingid} without token`, () =>
-      request.get(`/api/booking/${bookingid}`),
-    );
+    const { bookingid } = await test.step('Arrange: create booking', () => createValidBooking(createBooking, booking));
 
-    recordObservedStatus('unauthenticated GET', response.status());
-    expect(response.ok(), 'unauthenticated read must not succeed').toBe(false);
-    const body = await response.text();
-    expect(body).not.toContain(booking.lastname);
-    expect(body).not.toContain(booking.bookingdates.checkin);
+    const response = await test.step('Act: read booking without a token', async () => {
+      // Deliberately sent without the token cookie.
+      const readResponse = await send(`GET /api/booking/${bookingid} without token`, () =>
+        request.get(`/api/booking/${bookingid}`),
+      );
+      recordObservedStatus('unauthenticated GET', readResponse.status());
+      return readResponse;
+    });
+
+    await test.step('Verify: booking data is not exposed', async () => {
+      expect(response.ok(), 'unauthenticated read must not succeed').toBe(false);
+      const body = await response.text();
+      expect(body).not.toContain(booking.lastname);
+      expect(body).not.toContain(booking.bookingdates.checkin);
+    });
   });
 
   test('keeps a booking intact after an unauthenticated delete', async ({
@@ -137,17 +149,24 @@ test.describe('Booking API', () => {
     request,
   }) => {
     const booking = buildBooking(slot.roomid, slot.checkin);
-    const { bookingid } = await createValidBooking(createBooking, booking);
+
+    const { bookingid } = await test.step('Arrange: create booking', () => createValidBooking(createBooking, booking));
 
     // Ownership is checked with the token; the DELETE below is deliberately sent without it.
-    await expectStillOwned(bookingApi, bookingid, booking.lastname);
-    const response = await send(`DELETE /api/booking/${bookingid} without token`, () =>
-      request.delete(`/api/booking/${bookingid}`),
-    );
+    await test.step('Verify: booking is still owned by this test', () =>
+      expectStillOwned(bookingApi, bookingid, booking.lastname));
 
-    recordObservedStatus('unauthenticated DELETE', response.status());
-    const readResponse = await bookingApi.get(bookingid);
-    await expectStatus(readResponse, 200);
-    expect(await readResponse.json()).toMatchObject({ ...booking, bookingid });
+    await test.step('Act: delete booking without a token', async () => {
+      const response = await send(`DELETE /api/booking/${bookingid} without token`, () =>
+        request.delete(`/api/booking/${bookingid}`),
+      );
+      recordObservedStatus('unauthenticated DELETE', response.status());
+    });
+
+    await test.step('Verify: booking is still intact', async () => {
+      const readResponse = await bookingApi.get(bookingid);
+      await expectStatus(readResponse, 200);
+      expect(await readResponse.json()).toMatchObject({ ...booking, bookingid });
+    });
   });
 });
