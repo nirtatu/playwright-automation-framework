@@ -324,6 +324,27 @@ test.describe('ambiguous-create recovery', () => {
     expect(warnings).toEqual([]);
   });
 
+  test('searches for a create that failed without a response only after its window has passed', async () => {
+    let failedAt = 0;
+    // An early failure without a response (connection reset); the server completes the create
+    // 10ms later, within the 20ms window.
+    const client = new FakeClient({
+      list: () => res(200, { bookings: Date.now() - failedAt >= 10 ? [match(11)] : [] }),
+      get: seq(owned(11), NOT_FOUND),
+      delete: seq(res(202)),
+    });
+    const { tracker, warnings } = setUp(client, async () => {
+      failedAt = Date.now();
+      throw new Error('[transport] POST /api/booking: read ECONNRESET');
+    });
+
+    await tracker.create(BOOKING).catch(() => undefined);
+    await tracker.cleanUp();
+
+    expect(client.calls).toEqual(['LIST room 2 [T1]', 'GET 11 [T1]', 'DELETE 11 [T1]', 'GET 11 [T1]']);
+    expect(warnings).toEqual([]);
+  });
+
   test('deletes nothing and warns when no booking matches the marker', async () => {
     const client = new FakeClient({ list: seq(res(200, { bookings: [match(3, 'Other')] })) });
     const { tracker, warnings } = setUp(client, async () => res(201, {}));
@@ -384,6 +405,90 @@ test.describe('ambiguous-create recovery', () => {
     await tracker.cleanUp();
 
     expect(client.calls).toEqual(['LIST room 2 [T1]']);
+    expect(warnings).toEqual([
+      `ambiguous create ${MARKER} (room 2, check-in 2031-06-14) [create still in flight after waiting 0.02s in teardown]: 0 exact matches; nothing deleted, cleanup not guaranteed; the booking may still be created after this lookup and could remain on the site`,
+    ]);
+  });
+
+  // Late answers: the create is still unanswered when the wait ends, then answers while cleanup is
+  // searching for it. The LIST response is held back until that answer has been handled, so the
+  // order is fixed without relying on timing.
+  test('records a create that fails after the wait only once, as in flight', async () => {
+    let failCreate: (error: Error) => void = () => {};
+    let lateCreate: Promise<unknown> = Promise.resolve();
+    const noBookings = () => ({ bookings: [] });
+    const client = new FakeClient({
+      list: () => {
+        failCreate(new Error('[transport] POST /api/booking: Timeout 35000ms exceeded'));
+        return { status: () => 200, ok: () => true, json: () => lateCreate.then(noBookings, noBookings) };
+      },
+    });
+    const { tracker, warnings } = setUp(
+      client,
+      () =>
+        new Promise<CleanupResponse>((_, reject) => {
+          failCreate = reject;
+        }),
+    );
+
+    lateCreate = tracker.create(BOOKING);
+    await tracker.cleanUp();
+
+    expect(client.calls).toEqual(['LIST room 2 [T1]']);
+    expect(warnings).toEqual([
+      `ambiguous create ${MARKER} (room 2, check-in 2031-06-14) [create still in flight after waiting 0.02s in teardown]: 0 exact matches; nothing deleted, cleanup not guaranteed; the booking may still be created after this lookup and could remain on the site`,
+    ]);
+  });
+
+  test('does not search again for a create answered 500 without an id after the wait', async () => {
+    let answerCreate: (response: CleanupResponse) => void = () => {};
+    let lateCreate: Promise<unknown> = Promise.resolve();
+    const client = new FakeClient({
+      list: () => {
+        answerCreate(res(500));
+        return { status: () => 200, ok: () => true, json: () => lateCreate.then(() => ({ bookings: [] })) };
+      },
+    });
+    const { tracker, warnings } = setUp(
+      client,
+      () =>
+        new Promise<CleanupResponse>((resolve) => {
+          answerCreate = resolve;
+        }),
+    );
+
+    lateCreate = tracker.create(BOOKING);
+    await tracker.cleanUp();
+
+    expect(client.calls).toEqual(['LIST room 2 [T1]']);
+    expect(warnings).toEqual([
+      `ambiguous create ${MARKER} (room 2, check-in 2031-06-14) [create still in flight after waiting 0.02s in teardown]: 0 exact matches; nothing deleted, cleanup not guaranteed; the booking may still be created after this lookup and could remain on the site`,
+    ]);
+  });
+
+  test('still deletes by id a create that succeeds after the wait', async () => {
+    let answerCreate: (response: CleanupResponse) => void = () => {};
+    let lateCreate: Promise<unknown> = Promise.resolve();
+    const client = new FakeClient({
+      list: () => {
+        answerCreate(res(201, { bookingid: 7 }));
+        return { status: () => 200, ok: () => true, json: () => lateCreate.then(() => ({ bookings: [] })) };
+      },
+      get: seq(owned(), NOT_FOUND),
+      delete: seq(res(202)),
+    });
+    const { tracker, warnings } = setUp(
+      client,
+      () =>
+        new Promise<CleanupResponse>((resolve) => {
+          answerCreate = resolve;
+        }),
+    );
+
+    lateCreate = tracker.create(BOOKING);
+    await tracker.cleanUp();
+
+    expect(client.calls).toEqual(['LIST room 2 [T1]', 'GET 7 [T1]', 'DELETE 7 [T1]', 'GET 7 [T1]']);
     expect(warnings).toEqual([
       `ambiguous create ${MARKER} (room 2, check-in 2031-06-14) [create still in flight after waiting 0.02s in teardown]: 0 exact matches; nothing deleted, cleanup not guaranteed; the booking may still be created after this lookup and could remain on the site`,
     ]);

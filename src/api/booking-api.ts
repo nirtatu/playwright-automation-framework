@@ -17,8 +17,9 @@ export class BookingApi {
   }
 
   // Partial: negative tests deliberately send incomplete bookings (e.g. without a first name).
-  create(booking: Partial<Booking>): Promise<APIResponse> {
-    return send('POST /api/booking', () => this.request.post('/api/booking', { data: booking }));
+  // timeoutMs overrides the request context's default timeout (actionTimeout in the config).
+  create(booking: Partial<Booking>, timeoutMs?: number): Promise<APIResponse> {
+    return send('POST /api/booking', () => this.request.post('/api/booking', { data: booking, timeout: timeoutMs }));
   }
 
   get(id: number): Promise<APIResponse> {
