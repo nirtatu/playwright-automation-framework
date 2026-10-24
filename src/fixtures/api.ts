@@ -3,7 +3,7 @@ import { login, validateToken } from '../api/auth-api';
 import { BookingApi } from '../api/booking-api';
 import { expectStatus } from '../api/http';
 import { listRooms, type Room } from '../api/room-api';
-import { createBookingTracker } from '../cleanup/booking-cleanup';
+import { createBookingTracker, type BookingTracker } from '../cleanup/booking-cleanup';
 import { cleanupWarningLine } from '../cleanup/warning-output';
 import { adminCredentials, allowLiveWrites } from '../config/env';
 import { findFreeWindow, SLOT_WINDOW_DAYS, type Booking } from '../data/booking-data';
@@ -21,6 +21,15 @@ const GITHUB_ACTIONS = !!process.env.GITHUB_ACTIONS;
 const CI = !!process.env.CI;
 
 /**
+ * Budget for the bookingTracker fixture, which covers its setup and teardown together. Exceeding
+ * it ends teardown and replaces the worker, which kills a cleanup still in progress. 300s is a
+ * conservative bound for one tracked booking, not an absolute guarantee: the engine's worst case
+ * is a 35s wait for an in-flight create plus 7 requests at Playwright's default 30s request
+ * timeout (about 245s). Setup sends no requests, and a healthy cleanup takes about a second.
+ */
+const CLEANUP_TEARDOWN_TIMEOUT_MS = 300_000;
+
+/**
  * Opt-in for tests that write to BASE_URL. Without ALLOW_LIVE_WRITES=true the test is skipped
  * locally, and fails on CI so that a workflow missing the flag cannot pass with its write tests
  * silently skipped. Runs before any request is sent.
@@ -36,6 +45,7 @@ type ApiFixtures = {
   adminToken: string;
   bookingApi: BookingApi;
   slot: BookingSlot;
+  bookingTracker: BookingTracker<APIResponse>;
   createBooking: CreateBooking;
 };
 
@@ -71,9 +81,11 @@ export const test = base.extend<ApiFixtures>({
     await use({ roomid, checkin: checkin! });
   },
 
-  // Own 60s budget for setup and teardown, so cleanup is not squeezed by a slow test.
-  // Tracking and cleanup rules live in src/cleanup/booking-cleanup.ts (unit-tested offline).
-  createBooking: [
+  // Tracks this test's bookings and deletes them. Tracking and cleanup rules live in
+  // src/cleanup/booking-cleanup.ts (unit-tested offline). The engine's cleanUp() runs at most
+  // once: when the test calls it (cleanup verification) or otherwise in teardown. Teardown always
+  // awaits that single run, also after a test timeout, within CLEANUP_TEARDOWN_TIMEOUT_MS.
+  bookingTracker: [
     async ({ request, adminToken, bookingApi }, use, testInfo) => {
       const tracker = createBookingTracker({
         create: (booking) => bookingApi.create(booking),
@@ -92,11 +104,24 @@ export const test = base.extend<ApiFixtures>({
           else console.warn(line);
         },
       });
-      await use((booking) => tracker.create(booking));
-      await tracker.cleanUp();
+      let cleanup: Promise<void> | undefined;
+      const cleanUp = () => (cleanup ??= tracker.cleanUp());
+      await use({
+        create: async (booking) => {
+          // A booking created after cleanup started would never be deleted: refuse before sending.
+          if (cleanup) throw new Error('[setup] create after cleanUp(): the booking would not be cleaned up');
+          return tracker.create(booking);
+        },
+        cleanUp,
+      });
+      await cleanUp();
     },
-    { timeout: 60_000 },
+    { timeout: CLEANUP_TEARDOWN_TIMEOUT_MS },
   ],
+
+  createBooking: async ({ bookingTracker }, use) => {
+    await use((booking) => bookingTracker.create(booking));
+  },
 });
 
 export { expect };

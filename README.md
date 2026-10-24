@@ -33,6 +33,7 @@ The booking write tests do not run on every push; see [Continuous integration](#
 |---|---|---|---|
 | Authentication API | `tests/api/auth.spec.ts` | Valid login returns a token; a wrong password is rejected with 401 and returns no token | Manual workflow |
 | Booking API | `tests/api/booking.spec.ts` | Create and read back; update (verified by a follow-up read); delete (then 404); missing first name rejected with 400 and a field error; check-out before check-in rejected with 409; overlapping booking for the same room rejected with 409; an unauthenticated read exposes nothing; an unauthenticated delete leaves the booking intact | Manual workflow |
+| Cleanup (live) | `tests/api/cleanup.spec.ts` | After the tracker every write test uses runs cleanup, no warning is raised and a read of the booking it created returns 404 | Manual workflow |
 | Rooms API | `tests/api/rooms.spec.ts` | The room list has the expected shape (read-only) | Every push and pull request, and the manual workflow |
 | UI | `tests/ui/home.spec.ts` | The home page shows the rooms section with at least one room linking to a reservation page (read-only) | Every push and pull request |
 | Unit (offline) | `tests/unit/` | Cleanup engine, free-window search, redaction, failure messages, job summary rendering, warning output and the report scanner. Most use in-memory fakes; a few report-scanner tests start nested Playwright runs (one in Chromium) and the scanner CLI as local processes, without network requests | Every push and pull request |
@@ -44,7 +45,8 @@ The UI coverage is deliberately small and read-only today; the UI booking flow i
 ```
 tests/api, tests/ui            specs: assert application behaviour through fixtures and API clients
         │
-src/fixtures/api.ts            fixtures: adminToken, bookingApi, slot (free room/date window), createBooking
+src/fixtures/api.ts            fixtures: adminToken, bookingApi, slot (free room/date window), bookingTracker,
+                               createBooking
         │
         ├── src/api/           API clients: send each request once, return raw responses
         │                      (send/expectStatus label failures as transport, infrastructure or contract),
@@ -63,7 +65,7 @@ tests/unit                     offline unit tests for the modules above: in-memo
 ```
 
 - **API clients** (`src/api/*-api.ts`) wrap Playwright's request context, send each request once and return the raw response without asserting; specs decide what a status means. Assertions live in the specs and in shared helpers: `src/api/booking-checks.ts` holds booking assertion helpers (`createValidBooking`, and `expectStillOwned`, the ownership check before an in-test write), and `expectStatus` (`src/api/http.ts`) labels a wrong status as `[infrastructure]` (502, 503, 504) or `[contract]` (anything else), and `send` turns a request with no response into a `TransportError`, so a report shows which kind of failure occurred.
-- **Fixtures** (`src/fixtures/api.ts`) wire the layers together: a fresh admin token per test, a room and date window checked free of existing bookings, and a `createBooking` function whose bookings are cleaned up in teardown.
+- **Fixtures** (`src/fixtures/api.ts`) wire the layers together: a fresh admin token per test, a room and date window checked free of existing bookings, and a `createBooking` function whose bookings are cleaned up in teardown by the `bookingTracker` fixture. Cleanup runs once per test: in teardown, or earlier if the test calls it to verify cleanup.
 - **Cleanup engine** (`src/cleanup/booking-cleanup.ts`) holds every safety rule for test data. The fixture adapts the real API clients to its small interfaces; the unit tests pass fakes instead.
 - **Offline unit tests are enforced, not just intended.** ESLint forbids `src/cleanup`, `src/data`, `src/security`, `scripts` and `tests/unit` from importing the API clients, fixtures or environment config, and forbids unit tests from using the `request`, `page`, `context`, `browser` or `playwright` fixtures. The one exception is `src/api/http.ts`, whose redaction is unit-tested and which makes no requests on import.
 - **Type-aware linting** (`no-floating-promises`, `no-misused-promises`) catches a missing `await` on a request or assertion, which would otherwise let a test pass or fail for the wrong reason.
@@ -73,12 +75,12 @@ tests/unit                     offline unit tests for the modules above: in-memo
 - **API-first test data.** Tests create the bookings they need through the API and never depend on existing records. *Trade-off:* the UI booking flow itself is not covered yet.
 - **Ownership-marker cleanup.** Every booking gets a unique last name (`Auto-…`). Cleanup deletes only bookings the test created, and only after a fresh read shows the exact marker. In-test updates and deletes are guarded the same way. *Trade-off:* an extra request per write, and a race with an environment reset (which reuses booking IDs) is narrowed but cannot be ruled out.
 - **Isolated date windows.** Each test books inside a 30-day window, 2–12 years ahead, in a room checked for existing bookings in that window just before the test, so collisions with other users' data are very unlikely.
-- **Bounded recovery, never blind retries.** Creates are sent once and never retried. A create without a clear answer is recovered by a read-only search for its exact marker, adopted only if exactly one booking matches. Cleanup logs in again at most once, only after the token is confirmed invalid, and never re-sends a DELETE without a fresh ownership check. In-flight creates get a bounded wait (35s, within a 60s fixture budget). *Trade-off:* a create that completes after the recovery search can leave a booking behind; it is reported with its marker, room and check-in date rather than hidden.
+- **Bounded recovery, never blind retries.** Creates are sent once and never retried. A create without a clear answer is recovered by a read-only search for its exact marker, adopted only if exactly one booking matches. Cleanup logs in again at most once, only after the token is confirmed invalid, and never re-sends a DELETE without a fresh ownership check. In-flight creates get a bounded wait (35s), within a 300s teardown budget that is a conservative bound for one tracked booking, not a guarantee: a cleanup still running when the budget ends is stopped and reported as a fixture timeout. *Trade-off:* a create that completes after the recovery search can leave a booking behind; it is reported with its marker, room and check-in date rather than hidden.
 - **Cleanup never fails a test.** Problems become `cleanup-warning` annotations in the HTML report, console lines (GitHub Actions warning annotations on CI) and a section of the job summary, so a cleanup issue never hides the real test result.
 - **Outcomes over unstable status codes.** Unauthenticated tests assert the security outcome (nothing exposed, booking intact) and only record the status as an `observed-status` annotation, because the live site has answered both 500 and 403.
 - **Read-only checks separated from live writes.** Every push and pull request runs only tests that do not write to the shared site. Booking write tests run in a manual workflow that runs one at a time and is never cancelled automatically, because cancelling skips the teardown that deletes test data. *Trade-off:* write coverage is not exercised on every pull request.
 - **Explicit opt-in for writes.** Tests that create, update or delete bookings need `ALLOW_LIVE_WRITES=true`. Without it they are skipped locally and fail on CI, before any request is sent, so a plain `npm test` cannot write to the shared site and the live workflow cannot pass with its write tests skipped for lack of the flag. *Trade-off:* the check sits in the `adminToken` fixture that every write fixture depends on; a new fixture that writes without it would not be guarded.
-- **Offline unit tests for the safety logic.** Every cleanup branch (ownership check, recovery, re-login, late creates, free-window boundaries) is tested with fakes that fail on any unscripted call. They run on Playwright Test itself, so no second test runner is needed. *Trade-off:* the thin fixture adapter is exercised only by live runs.
+- **Offline unit tests for the safety logic.** Every cleanup branch (ownership check, recovery, re-login, late creates, free-window boundaries) is tested with fakes that fail on any unscripted call. They run on Playwright Test itself, so no second test runner is needed. The thin fixture wiring around the engine is checked against the live API by `tests/api/cleanup.spec.ts`. *Trade-off:* that test observes that the booking is gone after a warning-free cleanup; if a site reset removes the booking just before cleanup checks it, it cannot tell the two apart.
 - **Redaction and a pre-publication scan for a public report.** Failure messages and the job summary mask credential values, API tests are not traced (traces record request headers and bodies; only a manual `--trace` override re-enables it), and the published report is scanned before deployment. *Trade-off:* both are pattern-based: they cover the formats this framework produces and cannot guarantee that every secret is detected.
 - **Serial execution (`workers: 1`)** on a shared environment, until isolation and stability justify more parallelism.
 - **TypeScript 6.0.3 is pinned** because `typescript-eslint` does not support TypeScript 7 yet, and the type-aware lint rules need it.
@@ -102,7 +104,8 @@ scripts/
   report-scan.ts              HTML report scanner
   report-scan-cli.ts          command-line entry point (npm run report:scan)
 tests/
-  api/                        auth.spec.ts, booking.spec.ts (write to the target), rooms.spec.ts (read-only)
+  api/                        auth.spec.ts, booking.spec.ts and cleanup.spec.ts (both write to the
+                              target), rooms.spec.ts (read-only)
   ui/                         home.spec.ts (read-only)
   unit/                       booking-cleanup, booking-data, http-redaction, job-summary, redaction,
                               report-scan and warning-output specs (offline); support/ holds the
