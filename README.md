@@ -34,10 +34,13 @@ The booking write tests do not run on every push; see [Continuous integration](#
 | Authentication API | `tests/api/auth.spec.ts` | Valid login returns a token; a wrong password is rejected with 401 and returns no token | Manual workflow |
 | Booking API | `tests/api/booking.spec.ts` | Create and read back; update (verified by a follow-up read); delete (then 404); missing first name rejected with 400 and a field error; check-out before check-in rejected with 409; overlapping booking for the same room rejected with 409; an unauthenticated read exposes nothing; an unauthenticated delete leaves the booking intact | Manual workflow |
 | Rooms API | `tests/api/rooms.spec.ts` | The room list has the expected shape (read-only) | Every push and pull request, and the manual workflow |
-| UI | `tests/ui/home.spec.ts` | The home page shows the rooms section with at least one room linking to a reservation page (read-only) | Every push and pull request |
+| UI: rooms section | `tests/ui/home.spec.ts` | "shows the rooms section with at least one bookable room": the "Our Rooms" heading and a first "Book now" link to a reservation page (live data, read-only) | Every push and pull request |
+| UI: rooms match the API | `tests/ui/home.spec.ts` | "renders every room from its rooms API response with type, price and reservation link": the `GET /api/room` response the page received during load is rendered as exactly one card per room, with the room's type as title, its nightly price, and a "Book now" link to `/reservation/<roomid>` (live data, read-only; compared with that same response, not a second request) | Every push and pull request |
+| UI: rendering with mocked rooms | `tests/ui/home-rendering.spec.ts` | "renders exactly the mocked rooms with their type, price and reservation link": the browser's `GET /api/room` is answered by the test with three fixed rooms (ids, types and prices unlike the live data); the test asserts the mock answered the page's request, then that exactly one card per mocked room shows its type, nightly price and a "Book now" link to `/reservation/<roomid>`, and that the page raised no uncaught JavaScript errors (mocked rooms data, read-only; the page itself still loads from the live site) | Every push and pull request |
+| UI: default reservation dates | `tests/ui/reservation-links.spec.ts` | "links each mocked room to its reservation page with today and tomorrow as default dates": with the browser clock fixed at noon UTC on 2030-03-15 (timezone UTC) and `GET /api/room` answered by the test, the test asserts the mock was used and that every card's "Book now" link points to `/reservation/<roomid>` with `checkin=2030-03-15` and `checkout=2030-03-16`. Links are read, not clicked; the reservation page itself is not covered (mocked rooms data and fixed clock, read-only; the page itself still loads from the live site) | Every push and pull request |
 | Unit (offline) | `tests/unit/` | Cleanup engine, free-window search, redaction, failure messages, job summary rendering, warning output and the report scanner. Most use in-memory fakes; a few report-scanner tests start nested Playwright runs (one in Chromium) and the scanner CLI as local processes, without network requests | Every push and pull request |
 
-The UI coverage is deliberately small and read-only today; the UI booking flow is not covered yet.
+UI tests are tagged `@live` (rooms data from the live backend) or `@mock` (rooms data answered by the test); both kinds load the page itself from the live site, so neither is offline. UI tests are read-only: every UI spec imports `test` from the shared UI fixture (`src/ui/ui-test.ts`), which installs a write guard on each test's browser context that aborts non-GET requests to `/api/` paths from any page in that context, including popups, before they reach the server, and fails the test if any was attempted or the page raised an uncaught JavaScript error. The guard only covers non-GET requests under `/api/`: it does not intercept non-GET requests to other paths (such as the site's analytics beacon), WebSocket traffic, requests sent outside the browser, or GET requests with side effects (details under [Architecture](#architecture)). The UI booking flow is not covered yet.
 
 ## Architecture
 
@@ -53,6 +56,11 @@ src/fixtures/api.ts            fixtures: adminToken, bookingApi, slot (free room
         └── src/cleanup/       cleanup engine: create tracking, ownership-checked delete, recovery
                                (depends only on injected interfaces, no Playwright or HTTP imports)
 
+src/pages/                     page objects for the UI tests: locators and readers, no assertions
+src/ui/api-write-guard.ts      aborts and records non-GET /api/ requests from UI tests
+src/ui/rooms.ts                GET /api/room matcher, fixed rooms data and a counted mock for @mock tests
+src/ui/ui-test.ts              shared UI `test`: guard, service-worker blocking, page-error check
+
 src/security/redaction.ts      masks token, cookie, authorization and password values in failure
                                messages, transport errors and the job summary
 src/reporting/                 custom reporter that writes the GitHub Actions job summary
@@ -64,6 +72,8 @@ tests/unit                     offline unit tests for the modules above: in-memo
 
 - **API clients** (`src/api/*-api.ts`) wrap Playwright's request context, send each request once and return the raw response without asserting; specs decide what a status means. Assertions live in the specs and in shared helpers: `src/api/booking-checks.ts` holds booking assertion helpers (`createValidBooking`, and `expectStillOwned`, the ownership check before an in-test write), and `expectStatus` (`src/api/http.ts`) labels a wrong status as `[infrastructure]` (502, 503, 504) or `[contract]` (anything else), and `send` turns a request with no response into a `TransportError`, so a report shows which kind of failure occurred.
 - **Fixtures** (`src/fixtures/api.ts`) wire the layers together: a fresh admin token per test, a room and date window checked free of existing bookings, and a `createBooking` function whose bookings are cleaned up in teardown.
+- **Page objects** (`src/pages/`) expose locators and readers that return plain data; specs make the assertions, as with the API clients. `HomePage.readRoomCards()` reads the cards without waiting (tests assert the card count first) and throws a `[page]` error for a card without exactly one "Book now" link and one title, or whose link path or price cannot be parsed, so it never returns partial values.
+- **UI write guard** (`src/ui/api-write-guard.ts`) routes `/api/` requests on the test's browser context, so it covers every page in that context, including popups: GET requests continue unchanged, any other method is aborted before it is sent and recorded, and the record is checked at teardown. It is applied through the shared UI fixture (`src/ui/ui-test.ts`): a spec that imports `test` from it automatically gets service workers blocked (requests a service worker handles would bypass the routing), the guard installed before the test body runs, uncaught `pageerror` events recorded, and one teardown assertion that reports both blocked writes and page errors, also when the test itself has failed. A spec that imports `test` from `@playwright/test` instead gets none of this. Not covered: non-GET requests outside `/api/`, which are not routed at all (such as the site's Cloudflare analytics beacon), WebSocket traffic, requests sent outside the browser (such as Playwright's `request` fixture), and GET requests with side effects.
 - **Cleanup engine** (`src/cleanup/booking-cleanup.ts`) holds every safety rule for test data. The fixture adapts the real API clients to its small interfaces; the unit tests pass fakes instead.
 - **Offline unit tests are enforced, not just intended.** ESLint forbids `src/cleanup`, `src/data`, `src/security`, `scripts` and `tests/unit` from importing the API clients, fixtures or environment config, and forbids unit tests from using the `request`, `page`, `context`, `browser` or `playwright` fixtures. The one exception is `src/api/http.ts`, whose redaction is unit-tested and which makes no requests on import.
 - **Type-aware linting** (`no-floating-promises`, `no-misused-promises`) catches a missing `await` on a request or assertion, which would otherwise let a test pass or fail for the wrong reason.
@@ -95,14 +105,19 @@ src/
   config/env.ts               admin credentials from environment variables
   data/booking-data.ts        booking types, builders, unique markers, free-window search
   fixtures/api.ts             Playwright fixtures for the API tests
+  pages/home-page.ts          HomePage page object (rooms section, room-card and reservation-link readers)
   reporting/                  job-summary-reporter.ts (GitHub Actions job summary)
   security/redaction.ts       shared redaction of credential values
+  ui/api-write-guard.ts       blocks API writes from UI tests
+  ui/rooms.ts                 GET /api/room matcher, mocked rooms data and mock for @mock tests
+  ui/ui-test.ts               shared UI test fixture (guard, service workers, page errors)
 scripts/
   report-scan.ts              HTML report scanner
   report-scan-cli.ts          command-line entry point (npm run report:scan)
 tests/
   api/                        auth.spec.ts, booking.spec.ts (write to the target), rooms.spec.ts (read-only)
-  ui/                         home.spec.ts (read-only)
+  ui/                         home.spec.ts (live data), home-rendering.spec.ts and
+                              reservation-links.spec.ts (mocked rooms API); all read-only
   unit/                       booking-cleanup, booking-data, http-redaction, job-summary, redaction,
                               report-scan and warning-output specs (offline); support/ holds the
                               report scanner's synthetic report builders
