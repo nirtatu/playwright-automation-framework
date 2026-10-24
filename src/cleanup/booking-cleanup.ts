@@ -43,13 +43,21 @@ export interface BookingTracker<R extends CleanupResponse> {
   cleanUp: () => Promise<void>;
 }
 
-// Covers the proxy's backend retries (about 31s) and fits the fixture's 60s budget.
-export const IN_FLIGHT_WAIT_MS = 35_000;
+// Request timeout for creates, set by the API fixture: covers the proxy's backend retries (about
+// 31s, observed on the demo site).
+export const CREATE_REQUEST_TIMEOUT_MS = 35_000;
+
+// How long after a create is sent its booking may still appear, and the most cleanup waits for
+// creates in total. Longer than the create timeout, so a create that times out just before
+// cleanup starts is still answered within the wait.
+export const IN_FLIGHT_WAIT_MS = CREATE_REQUEST_TIMEOUT_MS + 5_000;
 
 interface AmbiguousCreate {
   booking: Partial<Booking>;
   reason: string;
   inFlight?: boolean; // still unanswered after the teardown wait; used only for warning text
+  // Failed without a response: the server may still complete it until this time (ms since epoch).
+  mayAppearUntil?: number;
 }
 
 interface PendingCreate extends AmbiguousCreate {
@@ -79,25 +87,32 @@ export function createBookingTracker<R extends CleanupResponse>({
         settled: Promise.resolve(),
       };
       pending.add(attempt); // recorded before sending; never retried
+      const sentAt = Date.now();
       const work = (async () => {
         let response: R;
         try {
           response = await create(booking);
         } catch (error) {
-          // No response: the booking may or may not exist. Recovered by marker in cleanup.
-          pending.delete(attempt);
-          ambiguous.push({ booking, reason: errorMessage(error) });
+          // No response: the booking may or may not exist, and may still be created (e.g. after a
+          // client timeout or reset). Recovered by marker in cleanup, once that window has passed.
+          // Not recorded again if cleanup already recorded it as in flight.
+          if (pending.delete(attempt)) {
+            ambiguous.push({ booking, reason: errorMessage(error), mayAppearUntil: sentAt + inFlightWaitMs });
+          }
           throw error;
         }
         const body = (await response.json().catch(() => undefined)) as { bookingid?: unknown } | undefined;
         const id = body?.bookingid;
+        const stillPending = pending.delete(attempt); // false once cleanup recorded it as in flight
         if (typeof id === 'number' && Number.isInteger(id) && id > 0) {
           // Tracked whatever the status, so an unexpected success in a negative test is cleaned up.
+          // Also after cleanup started: deleted if cleanup has not passed that point yet.
           tracked.set(id, booking.lastname ?? '');
-        } else if (response.ok() || response.status() >= 500) {
+        } else if (stillPending && (response.ok() || response.status() >= 500)) {
+          // Searched for at once. Residual risk: if a gateway answered 5xx while the backend was
+          // still creating the booking, it can appear after the search (reported as 0 matches).
           ambiguous.push({ booking, reason: `status ${response.status()} without a booking id` });
         }
-        pending.delete(attempt);
         return response;
       })();
       // Never rejects, so cleanup can wait on it; also gives `work` a rejection handler even if
@@ -115,7 +130,15 @@ export function createBookingTracker<R extends CleanupResponse>({
         [...pending].map((attempt) => attempt.settled),
         inFlightWaitMs,
       );
+      // Still unanswered: recorded once, as in flight. Clearing `pending` stops a late answer from
+      // recording the same create again while cleanup is running.
       ambiguous.push(...pending);
+      pending.clear();
+      // A marker search before a failed create's window has passed could miss a booking that
+      // appears later. If no create is sent after cleanUp() starts (the API fixture refuses them),
+      // every window ends within inFlightWaitMs of cleanup starting, so both waits together stay
+      // within inFlightWaitMs.
+      await waitUntil(Math.max(0, ...ambiguous.map((create) => create.mayAppearUntil ?? 0)));
       await cleanUpAll(new CleanupSession(client, token), tracked, ambiguous, warn);
     },
   };
@@ -141,6 +164,11 @@ async function waitForSettled(promises: Promise<void>[], ms: number): Promise<vo
   } finally {
     clearTimeout(timer);
   }
+}
+
+async function waitUntil(time: number): Promise<void> {
+  const ms = time - Date.now();
+  if (ms > 0) await new Promise<void>((resolve) => setTimeout(resolve, ms));
 }
 
 class CleanupSession {

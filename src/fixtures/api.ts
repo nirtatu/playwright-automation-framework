@@ -3,7 +3,7 @@ import { login, validateToken } from '../api/auth-api';
 import { BookingApi } from '../api/booking-api';
 import { expectStatus } from '../api/http';
 import { listRooms, type Room } from '../api/room-api';
-import { createBookingTracker, type BookingTracker } from '../cleanup/booking-cleanup';
+import { createBookingTracker, CREATE_REQUEST_TIMEOUT_MS, type BookingTracker } from '../cleanup/booking-cleanup';
 import { cleanupWarningLine } from '../cleanup/warning-output';
 import { adminCredentials, allowLiveWrites } from '../config/env';
 import { findFreeWindow, SLOT_WINDOW_DAYS, type Booking } from '../data/booking-data';
@@ -21,13 +21,21 @@ const GITHUB_ACTIONS = !!process.env.GITHUB_ACTIONS;
 const CI = !!process.env.CI;
 
 /**
- * Budget for the bookingTracker fixture, which covers its setup and teardown together. Exceeding
- * it ends teardown and replaces the worker, which kills a cleanup still in progress. 300s is a
- * conservative bound for one tracked booking, not an absolute guarantee: the engine's worst case
- * is a 35s wait for an in-flight create plus 7 requests at Playwright's default 30s request
- * timeout (about 245s). Setup sends no requests, and a healthy cleanup takes about a second.
+ * Budget for the bookingTracker fixture, which covers its setup and teardown together
+ * (test.slow() does not extend it). Exceeding it ends teardown and replaces the worker, which
+ * kills a cleanup still in progress. Worst case for the current specs, which create at most two
+ * bookings per test:
+ * - waiting for creates: at most IN_FLIGHT_WAIT_MS (40s) in total;
+ * - 14 cleanup requests, each bounded by the request context's default timeout, actionTimeout
+ *   (10s) in playwright.config.ts: 140s. Usually at most 13 (8 for one booking, including the
+ *   single re-login, and 5 for the other); a create answered with an id after the in-flight wait
+ *   can cost 9 instead of 8 (its marker search, then its deletion by id).
+ * That is a 180s workload; the 190s budget adds 10s of margin. Both are bounds under these
+ * assumptions, not an absolute guarantee. Setup sends no requests, and a healthy cleanup takes
+ * about a second. If these numbers change, update this and timeout-minutes in
+ * .github/workflows/api-live.yml.
  */
-const CLEANUP_TEARDOWN_TIMEOUT_MS = 300_000;
+const CLEANUP_TEARDOWN_TIMEOUT_MS = 190_000;
 
 /**
  * Opt-in for tests that write to BASE_URL. Without ALLOW_LIVE_WRITES=true the test is skipped
@@ -88,7 +96,8 @@ export const test = base.extend<ApiFixtures>({
   bookingTracker: [
     async ({ request, adminToken, bookingApi }, use, testInfo) => {
       const tracker = createBookingTracker({
-        create: (booking) => bookingApi.create(booking),
+        // Shorter than the engine's in-flight wait, so a create that times out is answered within it.
+        create: (booking) => bookingApi.create(booking, CREATE_REQUEST_TIMEOUT_MS),
         client: {
           bookingsFor: (token) => new BookingApi(request, token),
           validateToken: (token) => validateToken(request, token),
