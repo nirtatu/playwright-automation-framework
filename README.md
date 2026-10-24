@@ -160,17 +160,18 @@ npm run test:ui
 |---|---|
 | `npm run test:ui` | UI tests in Chromium. They load the live page and the rooms it requests, so they are not offline |
 | `npm test -- tests/unit/ tests/ui/ tests/api/rooms.spec.ts` | The automatic CI test selection: the offline unit tests plus the live UI tests and the live rooms API test |
+| `npm run test:api` (without `ALLOW_LIVE_WRITES=true`) | The auth and rooms API tests; the booking and cleanup tests are skipped locally |
 
-The API specs differ in what they do on the live service. `tests/api/rooms.spec.ts` (`GET /api/room`) and `tests/api/auth.spec.ts` (admin login, a `POST` that changes no booking data) contact it without writing booking data. `tests/api/booking.spec.ts` creates, updates and deletes bookings; the commands that run it are listed under "Writes to the configured target" below.
+The API specs differ in what they do on the live service. `tests/api/rooms.spec.ts` (`GET /api/room`) and `tests/api/auth.spec.ts` (admin login, a `POST` that changes no booking data) contact it without writing booking data. `tests/api/booking.spec.ts` and `tests/api/cleanup.spec.ts` create, update and delete bookings; the commands that run them are listed under "Writes to the configured target" below.
 
 **Test tags.** `@live` marks tests that contact the live target; `@writes` marks tests that create, update or delete booking data on the configured target. Preview a selection with `--list` before running it:
 
 | Command | What it lists |
 |---|---|
-| `npx playwright test --list --grep @writes` | Tests that create, update or delete booking data (currently the booking API tests) |
+| `npx playwright test --list --grep @writes` | Tests that create, update or delete booking data (currently the booking and cleanup API tests) |
 | `npx playwright test --list --grep-invert @live` | Tests not tagged `@live`. Currently `tests/ui/home.spec.ts` is untagged, so this includes that live UI test alongside the unit tests: it is **not** an offline selection |
 
-Tags are filters, not runtime safety guards: they only decide which tests a command selects, and a filter is only reliable when every relevant test is correctly tagged. An untagged test is silently included by `--grep-invert`. Likewise, `--grep-invert @writes` leaves out the tagged write tests but still runs the live read-only tests (UI, rooms and auth API), so it is not an offline selection either. For an offline run, use `npm run test:unit`.
+Tags are filters, not runtime safety guards: they only decide which tests a command selects, and a filter is only reliable when every relevant test is correctly tagged. An untagged test is silently included by `--grep-invert`. Likewise, `--grep-invert @writes` leaves out the tagged write tests but still runs the live read-only tests (UI, rooms and auth API), so it is not an offline selection either. For an offline run, use `npm run test:unit`. The runtime guard for writes is `ALLOW_LIVE_WRITES=true` (below): without it, tests that use the write fixtures (`bookingApi`, `slot`, `bookingTracker`, `createBooking`) are skipped locally and fail on CI, before any request is sent, whatever the tags select.
 
 **Writes to the configured target:**
 
@@ -179,7 +180,7 @@ Tags are filters, not runtime safety guards: they only decide which tests a comm
 | `ALLOW_LIVE_WRITES=true npm run test:api` | Full API suite. **Creates, updates and deletes bookings on `BASE_URL`** |
 | `ALLOW_LIVE_WRITES=true npm test` | Every project, including the API suite. **Creates, updates and deletes bookings on `BASE_URL`** |
 
-Without `ALLOW_LIVE_WRITES=true`, `npm run test:api` and `npm test` skip the booking tests. The auth, rooms and UI tests still send requests to `BASE_URL`, but do not create, update or delete data.
+Without `ALLOW_LIVE_WRITES=true`, `npm run test:api` and `npm test` skip the booking and cleanup tests locally (on CI, where `CI` is set, they fail instead). The auth, rooms and UI tests still send requests to `BASE_URL`, but do not create, update or delete data.
 
 > **Warning:** with `ALLOW_LIVE_WRITES=true`, the API suite sends real requests to `BASE_URL` (by default the public demo site) and creates, updates and deletes bookings there. Check `BASE_URL` before running it, and never point it at an environment where test bookings are not allowed.
 
