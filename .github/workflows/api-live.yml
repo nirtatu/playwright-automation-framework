@@ -49,8 +49,13 @@ jobs:
 
       # Workers (1), retries and reporters come from playwright.config.ts. Admin credentials
       # default to the public demo values in src/config/env.ts; no secrets are used.
+      # ALLOW_LIVE_WRITES opts in to the booking write tests, for this step only. Without it, those
+      # tests fail on CI (not skip), so this run cannot pass with its write tests skipped for lack
+      # of the flag.
       - name: Run API tests
         run: npm run test:api
+        env:
+          ALLOW_LIVE_WRITES: 'true'
 
       - name: Upload HTML report
         id: upload-report

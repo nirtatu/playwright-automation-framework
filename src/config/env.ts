@@ -4,3 +4,7 @@ export const adminCredentials = {
   username: process.env.ADMIN_USERNAME ?? 'admin',
   password: process.env.ADMIN_PASSWORD ?? 'password',
 };
+
+// Tests that create, update or delete bookings on BASE_URL run only with ALLOW_LIVE_WRITES=true
+// (exactly). Enforced by the API fixtures in src/fixtures/api.ts.
+export const allowLiveWrites = process.env.ALLOW_LIVE_WRITES === 'true';

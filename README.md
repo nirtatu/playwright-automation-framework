@@ -77,6 +77,7 @@ tests/unit                     offline unit tests for the modules above: in-memo
 - **Cleanup never fails a test.** Problems become `cleanup-warning` annotations in the HTML report, console lines (GitHub Actions warning annotations on CI) and a section of the job summary, so a cleanup issue never hides the real test result.
 - **Outcomes over unstable status codes.** Unauthenticated tests assert the security outcome (nothing exposed, booking intact) and only record the status as an `observed-status` annotation, because the live site has answered both 500 and 403.
 - **Read-only checks separated from live writes.** Every push and pull request runs only tests that do not write to the shared site. Booking write tests run in a manual workflow that runs one at a time and is never cancelled automatically, because cancelling skips the teardown that deletes test data. *Trade-off:* write coverage is not exercised on every pull request.
+- **Explicit opt-in for writes.** Tests that create, update or delete bookings need `ALLOW_LIVE_WRITES=true`. Without it they are skipped locally and fail on CI, before any request is sent, so a plain `npm test` cannot write to the shared site and the live workflow cannot pass with its write tests skipped for lack of the flag. *Trade-off:* the check sits in the `adminToken` fixture that every write fixture depends on; a new fixture that writes without it would not be guarded.
 - **Offline unit tests for the safety logic.** Every cleanup branch (ownership check, recovery, re-login, late creates, free-window boundaries) is tested with fakes that fail on any unscripted call. They run on Playwright Test itself, so no second test runner is needed. *Trade-off:* the thin fixture adapter is exercised only by live runs.
 - **Redaction and a pre-publication scan for a public report.** Failure messages and the job summary mask credential values, API tests are not traced (traces record request headers and bodies; only a manual `--trace` override re-enables it), and the published report is scanned before deployment. *Trade-off:* both are pattern-based: they cover the formats this framework produces and cannot guarantee that every secret is detected.
 - **Serial execution (`workers: 1`)** on a shared environment, until isolation and stability justify more parallelism.
@@ -127,6 +128,7 @@ Settings are read from environment variables:
 |---|---|---|
 | `BASE_URL` | `https://automationintesting.online` | Target environment for API and UI tests |
 | `ADMIN_USERNAME`, `ADMIN_PASSWORD` | The public demo credentials published by the application (see `src/config/env.ts`) | Admin login for the API tests |
+| `ALLOW_LIVE_WRITES` | Unset | Must be exactly `true` for tests that create, update or delete bookings. Otherwise they are skipped locally and fail on CI |
 
 No secrets are needed for the default target, and the workflows use none. The project does not load a `.env` file automatically (`.env` is git-ignored). To keep settings in one, export it into the shell first:
 
@@ -171,17 +173,19 @@ Tags are filters, not runtime safety guards: they only decide which tests a comm
 
 | Command | What it does |
 |---|---|
-| `npm run test:api` | Full API suite. **Creates, updates and deletes bookings on `BASE_URL`** |
-| `npm test` | Every project, including the API suite. **Creates, updates and deletes bookings on `BASE_URL`** |
+| `ALLOW_LIVE_WRITES=true npm run test:api` | Full API suite. **Creates, updates and deletes bookings on `BASE_URL`** |
+| `ALLOW_LIVE_WRITES=true npm test` | Every project, including the API suite. **Creates, updates and deletes bookings on `BASE_URL`** |
 
-> **Warning:** the API suite sends real requests to `BASE_URL` (by default the public demo site) and creates, updates and deletes bookings there. Check `BASE_URL` before running it, and never point it at an environment where test bookings are not allowed.
+Without `ALLOW_LIVE_WRITES=true`, `npm run test:api` and `npm test` skip the booking tests. The auth, rooms and UI tests still send requests to `BASE_URL`, but do not create, update or delete data.
+
+> **Warning:** with `ALLOW_LIVE_WRITES=true`, the API suite sends real requests to `BASE_URL` (by default the public demo site) and creates, updates and deletes bookings there. Check `BASE_URL` before running it, and never point it at an environment where test bookings are not allowed.
 
 ## Continuous integration
 
 | Workflow | Trigger | Runs |
 |---|---|---|
 | **Playwright Tests** (`playwright.yml`) | Pushes and pull requests to `main` | Type check, lint, format check, then unit tests, UI tests and the read-only rooms API test. It never writes to the target |
-| **API Tests (live, manual only)** (`api-live.yml`) | Manual only | Type check, lint, format check, then the full API suite (`npm run test:api`), including booking writes |
+| **API Tests (live, manual only)** (`api-live.yml`) | Manual only | Type check, lint, format check, then the full API suite (`npm run test:api`) with `ALLOW_LIVE_WRITES=true`, including booking writes |
 
 The automatic workflow selects tests by path. New UI and unit specs are included automatically; a new API spec runs on every push only if it is added to the list in `playwright.yml`, so API tests that write data stay manual by default.
 

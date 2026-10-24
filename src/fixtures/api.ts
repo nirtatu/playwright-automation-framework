@@ -1,11 +1,11 @@
-import { test as base, expect, type APIResponse } from '@playwright/test';
+import { test as base, expect, type APIResponse, type TestInfo } from '@playwright/test';
 import { login, validateToken } from '../api/auth-api';
 import { BookingApi } from '../api/booking-api';
 import { expectStatus } from '../api/http';
 import { listRooms, type Room } from '../api/room-api';
 import { createBookingTracker } from '../cleanup/booking-cleanup';
 import { cleanupWarningLine } from '../cleanup/warning-output';
-import { adminCredentials } from '../config/env';
+import { adminCredentials, allowLiveWrites } from '../config/env';
 import { findFreeWindow, SLOT_WINDOW_DAYS, type Booking } from '../data/booking-data';
 
 /** A room plus the first day of a window with no existing bookings in that room. */
@@ -18,6 +18,19 @@ export interface BookingSlot {
 export type CreateBooking = (booking: Partial<Booking>) => Promise<APIResponse>;
 
 const GITHUB_ACTIONS = !!process.env.GITHUB_ACTIONS;
+const CI = !!process.env.CI;
+
+/**
+ * Opt-in for tests that write to BASE_URL. Without ALLOW_LIVE_WRITES=true the test is skipped
+ * locally, and fails on CI so that a workflow missing the flag cannot pass with its write tests
+ * silently skipped. Runs before any request is sent.
+ */
+function requireLiveWrites(testInfo: TestInfo): void {
+  if (allowLiveWrites) return;
+  const reason = 'writes to BASE_URL require ALLOW_LIVE_WRITES=true';
+  if (CI) throw new Error(`[setup] ${reason}`);
+  testInfo.skip(true, reason);
+}
 
 type ApiFixtures = {
   adminToken: string;
@@ -28,7 +41,10 @@ type ApiFixtures = {
 
 export const test = base.extend<ApiFixtures>({
   // Test-scoped: a fresh token per test survives environment resets between tests.
-  adminToken: async ({ request }, use) => {
+  // Every write-capable fixture (bookingApi, slot, createBooking) depends on this one, so the
+  // live-write guard here runs before any of them sends a request.
+  adminToken: async ({ request }, use, testInfo) => {
+    requireLiveWrites(testInfo);
     const response = await login(request, adminCredentials);
     await expectStatus(response, 200, 'setup: admin login');
     const { token } = await response.json();
