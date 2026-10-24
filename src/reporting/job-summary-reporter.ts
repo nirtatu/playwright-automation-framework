@@ -7,7 +7,7 @@ import { redact } from '../security/redaction';
 // GITHUB_STEP_SUMMARY is set, so local runs are unaffected.
 
 export interface SummaryTest {
-  /** Project and title path, e.g. "[api] Booking API › updates a booking". */
+  /** Project and title path, e.g. "[api] Booking API › Booking lifecycle › updates a booking". */
   title: string;
   /** File and line, e.g. "tests/api/booking.spec.ts:41". */
   location: string;
