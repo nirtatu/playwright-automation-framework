@@ -1,11 +1,11 @@
-import { test as base, expect, type APIResponse } from '@playwright/test';
+import { test as base, expect, type APIResponse, type TestInfo } from '@playwright/test';
 import { login, validateToken } from '../api/auth-api';
 import { BookingApi } from '../api/booking-api';
 import { expectStatus } from '../api/http';
 import { listRooms, type Room } from '../api/room-api';
-import { createBookingTracker } from '../cleanup/booking-cleanup';
+import { createBookingTracker, CREATE_REQUEST_TIMEOUT_MS, type BookingTracker } from '../cleanup/booking-cleanup';
 import { cleanupWarningLine } from '../cleanup/warning-output';
-import { adminCredentials } from '../config/env';
+import { adminCredentials, allowLiveWrites } from '../config/env';
 import { findFreeWindow, SLOT_WINDOW_DAYS, type Booking } from '../data/booking-data';
 
 /** A room plus the first day of a window with no existing bookings in that room. */
@@ -18,17 +18,51 @@ export interface BookingSlot {
 export type CreateBooking = (booking: Partial<Booking>) => Promise<APIResponse>;
 
 const GITHUB_ACTIONS = !!process.env.GITHUB_ACTIONS;
+const CI = !!process.env.CI;
+
+/**
+ * Budget for the bookingTracker fixture, which covers its setup and teardown together
+ * (test.slow() does not extend it). Exceeding it ends teardown and replaces the worker, which
+ * kills a cleanup still in progress. Worst case for the current specs, which create at most two
+ * bookings per test:
+ * - waiting for creates: at most IN_FLIGHT_WAIT_MS (40s) in total;
+ * - 14 cleanup requests, each bounded by the request context's default timeout, actionTimeout
+ *   (10s) in playwright.config.ts: 140s. Usually at most 13 (8 for one booking, including the
+ *   single re-login, and 5 for the other); a create answered with an id after the in-flight wait
+ *   can cost 9 instead of 8 (its marker search, then its deletion by id).
+ * That is a 180s workload; the 190s budget adds 10s of margin. Both are bounds under these
+ * assumptions, not an absolute guarantee. Setup sends no requests, and a healthy cleanup takes
+ * about a second. If these numbers change, update this and timeout-minutes in
+ * .github/workflows/api-live.yml.
+ */
+const CLEANUP_TEARDOWN_TIMEOUT_MS = 190_000;
+
+/**
+ * Opt-in for tests that write to BASE_URL. Without ALLOW_LIVE_WRITES=true the test is skipped
+ * locally, and fails on CI so that a workflow missing the flag cannot pass with its write tests
+ * silently skipped. Runs before any request is sent.
+ */
+function requireLiveWrites(testInfo: TestInfo): void {
+  if (allowLiveWrites) return;
+  const reason = 'writes to BASE_URL require ALLOW_LIVE_WRITES=true';
+  if (CI) throw new Error(`[setup] ${reason}`);
+  testInfo.skip(true, reason);
+}
 
 type ApiFixtures = {
   adminToken: string;
   bookingApi: BookingApi;
   slot: BookingSlot;
+  bookingTracker: BookingTracker<APIResponse>;
   createBooking: CreateBooking;
 };
 
 export const test = base.extend<ApiFixtures>({
   // Test-scoped: a fresh token per test survives environment resets between tests.
-  adminToken: async ({ request }, use) => {
+  // Every write-capable fixture (bookingApi, slot, createBooking) depends on this one, so the
+  // live-write guard here runs before any of them sends a request.
+  adminToken: async ({ request }, use, testInfo) => {
+    requireLiveWrites(testInfo);
     const response = await login(request, adminCredentials);
     await expectStatus(response, 200, 'setup: admin login');
     const { token } = await response.json();
@@ -55,12 +89,15 @@ export const test = base.extend<ApiFixtures>({
     await use({ roomid, checkin: checkin! });
   },
 
-  // Own 60s budget for setup and teardown, so cleanup is not squeezed by a slow test.
-  // Tracking and cleanup rules live in src/cleanup/booking-cleanup.ts (unit-tested offline).
-  createBooking: [
+  // Tracks this test's bookings and deletes them. Tracking and cleanup rules live in
+  // src/cleanup/booking-cleanup.ts (unit-tested offline). The engine's cleanUp() runs at most
+  // once: when the test calls it (cleanup verification) or otherwise in teardown. Teardown always
+  // awaits that single run, also after a test timeout, within CLEANUP_TEARDOWN_TIMEOUT_MS.
+  bookingTracker: [
     async ({ request, adminToken, bookingApi }, use, testInfo) => {
       const tracker = createBookingTracker({
-        create: (booking) => bookingApi.create(booking),
+        // Shorter than the engine's in-flight wait, so a create that times out is answered within it.
+        create: (booking) => bookingApi.create(booking, CREATE_REQUEST_TIMEOUT_MS),
         client: {
           bookingsFor: (token) => new BookingApi(request, token),
           validateToken: (token) => validateToken(request, token),
@@ -76,11 +113,24 @@ export const test = base.extend<ApiFixtures>({
           else console.warn(line);
         },
       });
-      await use((booking) => tracker.create(booking));
-      await tracker.cleanUp();
+      let cleanup: Promise<void> | undefined;
+      const cleanUp = () => (cleanup ??= tracker.cleanUp());
+      await use({
+        create: async (booking) => {
+          // A booking created after cleanup started would never be deleted: refuse before sending.
+          if (cleanup) throw new Error('[setup] create after cleanUp(): the booking would not be cleaned up');
+          return tracker.create(booking);
+        },
+        cleanUp,
+      });
+      await cleanUp();
     },
-    { timeout: 60_000 },
+    { timeout: CLEANUP_TEARDOWN_TIMEOUT_MS },
   ],
+
+  createBooking: async ({ bookingTracker }, use) => {
+    await use((booking) => bookingTracker.create(booking));
+  },
 });
 
 export { expect };
