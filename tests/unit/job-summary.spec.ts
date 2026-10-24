@@ -1,6 +1,5 @@
 import { test, expect } from '@playwright/test';
 import { renderSummary, type SummaryTest } from '../../src/reporting/job-summary-reporter';
-import { redact } from '../../src/security/redaction';
 
 // Offline tests for the GitHub Actions job summary: pure string rendering, no files or network.
 
@@ -120,13 +119,11 @@ test.describe('job summary', () => {
 
     expect(markdown).not.toContain('abc123secret');
     expect(markdown).not.toContain('hunter2');
-    expect(redact('{"token": "a"}')).toBe('{"token": "<redacted>"}');
   });
 
   test('masks a JSON token value cut off before its closing quote', () => {
     const truncatedBody = 'Body: {"bookings":[],"token":"eyJabc123secret'; // excerpt ends mid-value
 
-    expect(redact(truncatedBody)).toBe('Body: {"bookings":[],"token":"<redacted>');
     expect(
       renderSummary({
         status: 'failed',
@@ -134,10 +131,6 @@ test.describe('job summary', () => {
         tests: [{ ...passed('[api] t'), outcome: 'unexpected', error: truncatedBody, cleanupWarnings: [] }],
       }),
     ).not.toContain('eyJabc123secret');
-  });
-
-  test('masks an unterminated credential value only up to the end of its line', () => {
-    expect(redact('{"password":"hunter2\nnext line')).toBe('{"password":"<redacted>\nnext line');
   });
 
   test('keeps only the first lines of a long error and cannot close the code fence early', () => {

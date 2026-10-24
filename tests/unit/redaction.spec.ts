@@ -16,8 +16,8 @@ const CALL_LOG_ERROR = [
 
 test.describe('redact', () => {
   test('masks JSON token and password values', () => {
-    expect(redact('{"token":"s3cr3tToken","password": "hunter2","bookingid":7}')).toBe(
-      '{"token":"<redacted>","password": "<redacted>","bookingid":7}',
+    expect(redact('{"token":"s3cr3tToken","password": "hunter2","nested":{"token": "a"},"bookingid":7}')).toBe(
+      '{"token":"<redacted>","password": "<redacted>","nested":{"token": "<redacted>"},"bookingid":7}',
     );
   });
 
