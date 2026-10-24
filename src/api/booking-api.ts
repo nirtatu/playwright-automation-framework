@@ -1,4 +1,5 @@
 import type { APIRequestContext, APIResponse } from '@playwright/test';
+import type { Booking } from '../data/booking-data';
 import { send } from './http';
 
 /**
@@ -15,7 +16,8 @@ export class BookingApi {
     return { Cookie: `token=${this.token}` };
   }
 
-  create(booking: object): Promise<APIResponse> {
+  // Partial: negative tests deliberately send incomplete bookings (e.g. without a first name).
+  create(booking: Partial<Booking>): Promise<APIResponse> {
     return send('POST /api/booking', () => this.request.post('/api/booking', { data: booking }));
   }
 
@@ -29,7 +31,7 @@ export class BookingApi {
     );
   }
 
-  update(id: number, booking: object): Promise<APIResponse> {
+  update(id: number, booking: Booking): Promise<APIResponse> {
     return send(`PUT /api/booking/${id}`, () =>
       this.request.put(`/api/booking/${id}`, { data: booking, headers: this.headers }),
     );
