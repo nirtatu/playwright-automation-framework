@@ -5,7 +5,8 @@ import { expectStatus } from '../api/http';
 import { listRooms, type Room } from '../api/room-api';
 import { createBookingTracker, CREATE_REQUEST_TIMEOUT_MS, type BookingTracker } from '../cleanup/booking-cleanup';
 import { cleanupWarningLine } from '../cleanup/warning-output';
-import { adminCredentials, allowLiveWrites } from '../config/env';
+import { adminCredentials, allowLiveWritesFlag } from '../config/env';
+import { liveWriteDecision } from '../config/live-writes';
 import { findFreeWindow, SLOT_WINDOW_DAYS, type Booking } from '../data/booking-data';
 
 /** A room plus the first day of a window with no existing bookings in that room. */
@@ -40,12 +41,14 @@ const CLEANUP_TEARDOWN_TIMEOUT_MS = 190_000;
 /**
  * Opt-in for tests that write to BASE_URL. Without ALLOW_LIVE_WRITES=true the test is skipped
  * locally, and fails on CI so that a workflow missing the flag cannot pass with its write tests
- * silently skipped. Runs before any request is sent.
+ * silently skipped. Runs before any request is sent. The decision is in src/config/live-writes.ts
+ * (unit-tested).
  */
 function requireLiveWrites(testInfo: TestInfo): void {
-  if (allowLiveWrites) return;
+  const decision = liveWriteDecision(allowLiveWritesFlag, CI);
+  if (decision === 'allow') return;
   const reason = 'writes to BASE_URL require ALLOW_LIVE_WRITES=true';
-  if (CI) throw new Error(`[setup] ${reason}`);
+  if (decision === 'fail') throw new Error(`[setup] ${reason}`);
   testInfo.skip(true, reason);
 }
 
@@ -91,7 +94,7 @@ export const test = base.extend<ApiFixtures>({
 
   // Tracks this test's bookings and deletes them. Tracking and cleanup rules live in
   // src/cleanup/booking-cleanup.ts (unit-tested offline). The engine's cleanUp() runs at most
-  // once: when the test calls it (cleanup verification) or otherwise in teardown. Teardown always
+  // once: when a test calls it, or otherwise in teardown. Teardown always
   // awaits that single run, also after a test timeout, within CLEANUP_TEARDOWN_TIMEOUT_MS.
   bookingTracker: [
     async ({ request, adminToken, bookingApi }, use, testInfo) => {

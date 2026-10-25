@@ -59,9 +59,15 @@ export default defineConfig(
               message: 'Unit tests must stay offline: inject fakes instead.',
             },
           ],
-          // One exception: src/api/http.ts (send, expectStatus, TransportError) has no network side
-          // effects on import, so its redaction can be tested offline. Other API clients stay banned.
-          patterns: [{ group: ['**/api/*', '!**/api/http', '**/fixtures/*', '**/config/*'], message: OFFLINE_MESSAGE }],
+          // Two exceptions: src/api/http.ts (send, expectStatus, TransportError) has no network side
+          // effects on import, so its redaction can be tested offline; src/config/live-writes.ts
+          // reads no environment variables. Other API clients and config stay banned.
+          patterns: [
+            {
+              group: ['**/api/*', '!**/api/http', '**/fixtures/*', '**/config/*', '!**/config/live-writes'],
+              message: OFFLINE_MESSAGE,
+            },
+          ],
         },
       ],
       'no-restricted-syntax': [

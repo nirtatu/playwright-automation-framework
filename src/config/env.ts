@@ -6,5 +6,6 @@ export const adminCredentials = {
 };
 
 // Tests that create, update or delete bookings on BASE_URL run only with ALLOW_LIVE_WRITES=true
-// (exactly). Enforced by the API fixtures in src/fixtures/api.ts.
-export const allowLiveWrites = process.env.ALLOW_LIVE_WRITES === 'true';
+// (exactly). Decided by src/config/live-writes.ts, enforced by the API fixtures in
+// src/fixtures/api.ts.
+export const allowLiveWritesFlag = process.env.ALLOW_LIVE_WRITES;
