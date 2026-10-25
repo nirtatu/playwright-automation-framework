@@ -19,7 +19,15 @@ jobs:
   api-tests:
     name: Type check and API tests (live site)
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Must outlast the run, or GitHub cancels it mid-teardown and leaves bookings on the site.
+    # Network-bound estimate, not a strict upper bound: if every test fails at its full test and
+    # cleanup-fixture budget and is retried once (CI retries: 1), and local-only phases (other
+    # teardown, tracing) take about 0s:
+    # 2 × (8 write tests × (30s test + 190s cleanup) + cleanup.spec × (30s + 190s + 10s for its
+    # check after cleanup) + 3 read-only tests × 30s) = 4160s, about 69 min. Estimated on top:
+    # about 1 min of worker restarts (24 failures, a few seconds each) and about 5 min for the
+    # other steps, so about 75 min in total.
+    timeout-minutes: 80
 
     steps:
       - name: Check out repository
@@ -49,8 +57,13 @@ jobs:
 
       # Workers (1), retries and reporters come from playwright.config.ts. Admin credentials
       # default to the public demo values in src/config/env.ts; no secrets are used.
+      # ALLOW_LIVE_WRITES opts in to the booking write tests, for this step only. Without it, those
+      # tests fail on CI (not skip), so this run cannot pass with its write tests skipped for lack
+      # of the flag.
       - name: Run API tests
         run: npm run test:api
+        env:
+          ALLOW_LIVE_WRITES: 'true'
 
       - name: Upload HTML report
         id: upload-report
