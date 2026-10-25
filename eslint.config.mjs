@@ -46,6 +46,54 @@ export default defineConfig(
       ],
     },
   },
+  // UI specs are read-only only through the shared UI fixture (src/ui/ui-test.ts), whose write guard
+  // routes the browser's requests. Its `test` must be used, and nothing may send requests the guard
+  // does not see (a request context) or reach the API fixtures and environment config.
+  {
+    files: ['tests/ui/**/*.ts'],
+    rules: {
+      '@typescript-eslint/no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: '@playwright/test',
+              importNames: ['test', 'request'],
+              allowTypeImports: true,
+              message:
+                'Import test from src/ui/ui-test (it installs the UI write guard); request contexts bypass the guard.',
+            },
+          ],
+          patterns: [
+            {
+              group: ['**/fixtures/*', '**/config/*'],
+              message: 'UI specs must not use the API fixtures or environment config.',
+            },
+            {
+              // Types (e.g. Room) and src/api/http.ts (expectStatus) are fine; API clients send requests
+              // the UI write guard does not see.
+              group: ['**/api/*', '!**/api/http'],
+              allowTypeImports: true,
+              message: 'UI specs must not call the API clients: their requests bypass the UI write guard.',
+            },
+          ],
+        },
+      ],
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: ':function > ObjectPattern > Property[key.name=/^(request|browser|playwright)$/]',
+          message:
+            'UI specs must not use the request, browser or playwright fixtures: their requests and new contexts bypass the UI write guard.',
+        },
+        {
+          selector:
+            "MemberExpression[property.name='request']:matches([object.name=/^(page|context)$/], [object.callee.property.name='context'])",
+          message: 'page.request and context.request send requests the UI write guard does not see.',
+        },
+      ],
+    },
+  },
   {
     files: ['tests/unit/**/*.ts'],
     rules: {
