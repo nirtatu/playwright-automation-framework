@@ -23,10 +23,10 @@ jobs:
     # Network-bound estimate, not a strict upper bound: if every test fails at its full test and
     # cleanup-fixture budget and is retried once (CI retries: 1), and local-only phases (other
     # teardown, tracing) take about 0s:
-    # 2 × (8 write tests × (30s test + 190s cleanup) + cleanup.spec × (90s with test.slow() + 190s)
-    # + 3 read-only tests × 30s) = 4260s, about 71 min. Estimated on top: about 1 min of worker
-    # restarts (24 failures, a few seconds each) and about 5 min for the other steps, so about
-    # 77 min in total.
+    # 2 × (8 write tests × (30s test + 190s cleanup) + cleanup.spec × (30s + 190s + 10s for its
+    # check after cleanup) + 3 read-only tests × 30s) = 4160s, about 69 min. Estimated on top:
+    # about 1 min of worker restarts (24 failures, a few seconds each) and about 5 min for the
+    # other steps, so about 75 min in total.
     timeout-minutes: 80
 
     steps:

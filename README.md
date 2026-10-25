@@ -33,10 +33,10 @@ The booking write tests do not run on every push; see [Continuous integration](#
 |---|---|---|---|
 | Authentication API | `tests/api/auth.spec.ts` | Valid login returns a token; a wrong password is rejected with 401 and returns no token | Manual workflow |
 | Booking API | `tests/api/booking.spec.ts` | Create and read back; update (verified by a follow-up read); delete (then 404); missing first name rejected with 400 and a field error; check-out before check-in rejected with 409; overlapping booking for the same room rejected with 409; an unauthenticated read exposes nothing; an unauthenticated delete leaves the booking intact | Manual workflow |
-| Cleanup (live) | `tests/api/cleanup.spec.ts` | After the tracker every write test uses runs cleanup, no warning is raised and a read of the booking it created returns 404 | Manual workflow |
+| Cleanup (live) | `tests/api/cleanup.spec.ts` | A booking created through `createBooking` is removed by the automatic after-test cleanup every write test uses: no warning is raised and a read of the booking returns 404 | Manual workflow |
 | Rooms API | `tests/api/rooms.spec.ts` | The room list has the expected shape (read-only) | Every push and pull request, and the manual workflow |
 | UI | `tests/ui/home.spec.ts` | The home page shows the rooms section with at least one room linking to a reservation page (read-only) | Every push and pull request |
-| Unit (offline) | `tests/unit/` | Cleanup engine, free-window search, redaction, failure messages, job summary rendering, warning output and the report scanner. Most use in-memory fakes; a few report-scanner tests start nested Playwright runs (one in Chromium) and the scanner CLI as local processes, without network requests | Every push and pull request |
+| Unit (offline) | `tests/unit/` | Cleanup engine, live-write guard decision, free-window search, redaction, failure messages, job summary rendering, warning output and the report scanner. Most use in-memory fakes; a few report-scanner tests start nested Playwright runs (one in Chromium) and the scanner CLI as local processes, without network requests | Every push and pull request |
 
 The UI coverage is deliberately small and read-only today; the UI booking flow is not covered yet.
 
@@ -67,7 +67,7 @@ tests/unit                     offline unit tests for the modules above: in-memo
 - **API clients** (`src/api/*-api.ts`) wrap Playwright's request context, send each request once and return the raw response without asserting; specs decide what a status means. Assertions live in the specs and in shared helpers: `src/api/booking-checks.ts` holds booking assertion helpers (`createValidBooking`, and `expectStillOwned`, the ownership check before an in-test write), and `expectStatus` (`src/api/http.ts`) labels a wrong status as `[infrastructure]` (502, 503, 504) or `[contract]` (anything else), and `send` turns a request with no response into a `TransportError`, so a report shows which kind of failure occurred.
 - **Fixtures** (`src/fixtures/api.ts`) wire the layers together: a fresh admin token per test, a room and date window checked free of existing bookings, and a `createBooking` function whose bookings are cleaned up in teardown by the `bookingTracker` fixture. Cleanup runs once per test: in teardown, or earlier if the test calls it to verify cleanup.
 - **Cleanup engine** (`src/cleanup/booking-cleanup.ts`) holds every safety rule for test data. The fixture adapts the real API clients to its small interfaces; the unit tests pass fakes instead.
-- **Offline unit tests are enforced, not just intended.** ESLint forbids `src/cleanup`, `src/data`, `src/security`, `scripts` and `tests/unit` from importing the API clients, fixtures or environment config, and forbids unit tests from using the `request`, `page`, `context`, `browser` or `playwright` fixtures. The one exception is `src/api/http.ts`, whose redaction is unit-tested and which makes no requests on import.
+- **Offline unit tests are enforced, not just intended.** ESLint forbids `src/cleanup`, `src/data`, `src/security`, `scripts` and `tests/unit` from importing the API clients, fixtures or environment config, and forbids unit tests from using the `request`, `page`, `context`, `browser` or `playwright` fixtures. The exceptions are `src/api/http.ts`, whose redaction is unit-tested and which makes no requests on import, and `src/config/live-writes.ts`, the live-write guard decision, which reads no environment variables.
 - **Type-aware linting** (`no-floating-promises`, `no-misused-promises`) catches a missing `await` on a request or assertion, which would otherwise let a test pass or fail for the wrong reason.
 
 ## Design decisions and trade-offs
@@ -107,8 +107,8 @@ tests/
   api/                        auth.spec.ts, booking.spec.ts and cleanup.spec.ts (both write to the
                               target), rooms.spec.ts (read-only)
   ui/                         home.spec.ts (read-only)
-  unit/                       booking-cleanup, booking-data, http-redaction, job-summary, redaction,
-                              report-scan and warning-output specs (offline); support/ holds the
+  unit/                       booking-cleanup, booking-data, http-redaction, job-summary, live-writes,
+                              redaction, report-scan and warning-output specs (offline); support/ holds the
                               report scanner's synthetic report builders
 playwright.config.ts          projects: api, chromium, unit
 eslint.config.mjs, .prettierrc, .prettierignore, tsconfig.json
