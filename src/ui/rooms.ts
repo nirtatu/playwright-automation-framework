@@ -1,7 +1,9 @@
-import type { Page, Response } from '@playwright/test';
+import { expect, type Page, type Response } from '@playwright/test';
+import type { Room } from '../api/room-api';
+import { redact } from '../security/redaction';
 
-// Rooms list helpers for UI tests: the endpoint matcher (live and mocked specs) and the deterministic
-// mock (`@mock` specs).
+// Rooms list helpers for UI tests: the endpoint matcher and response reader (live and mocked specs)
+// and the deterministic mock (`@mock` specs).
 
 // Deterministic rooms for `@mock` UI tests. Ids and prices differ from the live data, so a pass shows
 // the cards were rendered from this mock. The extra fields follow the rooms API shape, so the page has
@@ -45,9 +47,9 @@ export const EXTERNAL_IMAGE_HOST = 'external-images.example';
 /** The room in MANY_MOCK_ROOMS whose image is on EXTERNAL_IMAGE_HOST. */
 export const EXTERNAL_IMAGE_ROOM_ID = 922;
 
-// More than three rooms, with the external-image room second. On the live site a fourth room with an
-// external image was not rendered; this order tells the possible rules apart: all five rendered, only
-// the first three (922 included), or every room except 922.
+// More than three rooms, with the external-image room second. The page renders only the first three
+// rooms of the response (the shipped code renders `rooms.slice(0, 3)`), so 921, 922 and 923 are shown,
+// 922 with its external image.
 export const MANY_MOCK_ROOMS = [
   { ...MOCK_ROOMS[0], roomid: 921, roomName: '921', type: 'Single', roomPrice: 121 },
   {
@@ -70,14 +72,14 @@ const PIXEL_PNG = Buffer.from(
 );
 
 /**
- * Answers image requests to EXTERNAL_IMAGE_HOST with a valid image, so tests do not depend on an
- * external host being reachable. Returns a counter of answered requests (the page may load images
- * lazily, so it can stay 0).
+ * Answers image requests to `host` (EXTERNAL_IMAGE_HOST by default) with a valid image, so tests do
+ * not depend on an external host being reachable; also used for map tiles. Returns a counter of
+ * answered requests (the page may load images lazily, so it can stay 0).
  */
-export async function mockExternalImages(page: Page): Promise<{ fulfilled: number }> {
+export async function mockExternalImages(page: Page, host = EXTERNAL_IMAGE_HOST): Promise<{ fulfilled: number }> {
   const counter = { fulfilled: 0 };
   await page.route(
-    (url) => url.hostname === EXTERNAL_IMAGE_HOST,
+    (url) => url.hostname === host,
     async (route) => {
       counter.fulfilled += 1;
       await route.fulfill({ contentType: 'image/png', body: PIXEL_PNG });
@@ -93,12 +95,50 @@ export const isRoomsList = (url: URL) => url.pathname === '/api/room';
 export const isRoomsListResponse = (response: Response) =>
   response.request().method() === 'GET' && isRoomsList(new URL(response.url()));
 
+/** How failure messages name the rooms list endpoint. */
+export const ROOMS_LIST_ENDPOINT = 'GET /api/room';
+
+/** The `rooms` array of a GET /api/room response the page received, with failures that name the endpoint. */
+export async function readRoomsList(response: Response): Promise<Room[]> {
+  let text: string;
+  try {
+    text = await response.text();
+  } catch {
+    // The read error is not kept: the message names the endpoint.
+    throw new Error(`[contract] ${ROOMS_LIST_ENDPOINT}: response body could not be read`);
+  }
+  let body: unknown;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    // The parse error is not kept: it can quote the raw body. A redacted excerpt replaces it, truncated
+    // before redaction as in expectStatus.
+    const excerpt = text === '' ? '<empty body>' : redact(text.slice(0, 200));
+    throw new Error(`[contract] ${ROOMS_LIST_ENDPOINT}: response body is not valid JSON. Body: ${excerpt}`);
+  }
+  const rooms = (body as { rooms?: unknown } | null)?.rooms;
+  expect(Array.isArray(rooms), `[contract] ${ROOMS_LIST_ENDPOINT}: response body has a "rooms" array`).toBe(true);
+  return rooms as Room[];
+}
+
 /**
- * Answers the page's GET /api/room with `rooms`, before it reaches the network. Other methods fall
- * through to the write guard. Returns a counter of answered requests, so a test can prove the mock
- * was used rather than silently rendering live data.
+ * Answers the page's GET /api/room with `rooms` (status 200), before it reaches the network. Other
+ * methods fall through to the write guard. Returns a counter of answered requests, so a test can prove
+ * the mock was used rather than silently rendering live data.
  */
 export async function mockRoomsList(page: Page, rooms: unknown[]): Promise<{ fulfilled: number }> {
+  return mockRoomsListResponse(page, { status: 200, json: { rooms } });
+}
+
+/**
+ * Answers the page's GET /api/room with `status` and the JSON body `json`, before it reaches the
+ * network; for failure and empty states (e.g. the site's failure shape, 500 with `[]`). Other methods
+ * fall through to the write guard. Returns a counter of answered requests.
+ */
+export async function mockRoomsListResponse(
+  page: Page,
+  response: { status: number; json: unknown },
+): Promise<{ fulfilled: number }> {
   const counter = { fulfilled: 0 };
   // A page route takes precedence over the write guard's context route.
   await page.route(isRoomsList, async (route) => {
@@ -107,7 +147,7 @@ export async function mockRoomsList(page: Page, rooms: unknown[]): Promise<{ ful
       return;
     }
     counter.fulfilled += 1;
-    await route.fulfill({ json: { rooms } });
+    await route.fulfill({ status: response.status, json: response.json });
   });
   return counter;
 }
