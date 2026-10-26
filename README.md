@@ -188,7 +188,7 @@ The API specs differ in what they do on the live service. `tests/api/rooms.spec.
 | Command | What it lists |
 |---|---|
 | `npx playwright test --list --grep @writes` | Tests that create, update or delete booking data (currently the booking API tests) |
-| `npx playwright test --list --grep-invert @live` | Tests not tagged `@live`. `tests/ui/home.spec.ts` is tagged `@live`, but the `@mock` UI tests (`home-rendering.spec.ts`, `reservation-links.spec.ts`) are not, and they still load the page from the live site, so this includes them alongside the unit tests: it is **not** an offline selection |
+| `npx playwright test --list --grep-invert @live` | Tests not tagged `@live`. Currently `tests/ui/home.spec.ts` is untagged, so this includes that live UI test alongside the unit tests: it is **not** an offline selection |
 
 Tags are filters, not runtime safety guards: they only decide which tests a command selects, and a filter is only reliable when every relevant test is correctly tagged. An untagged test is silently included by `--grep-invert`. Likewise, `--grep-invert @writes` leaves out the tagged write tests but still runs the live read-only tests (UI, rooms and auth API), so it is not an offline selection either. For an offline run, use `npm run test:unit`.
 
