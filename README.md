@@ -203,6 +203,26 @@ Tags are filters, not runtime safety guards: they only decide which tests a comm
 
 > **Warning:** the API suite sends real requests to `BASE_URL` (by default the public demo site) and creates, updates and deletes bookings there. Check `BASE_URL` before running it, and never point it at an environment where test bookings are not allowed.
 
+### Running in Docker
+
+The `Dockerfile` uses the official Playwright image for the pinned version (`mcr.microsoft.com/playwright:v1.64.1-noble`, which includes Chromium and its system dependencies) and installs the project with `npm ci`. Its default command runs only the offline unit tests. `.dockerignore` keeps `.env` files, `.git/`, `node_modules/` and generated reports out of the image.
+
+```bash
+docker build -t playwright-framework .
+
+# Offline unit tests (the default command); reports and test artifacts are kept on the host
+docker run --rm --init --ipc=host \
+  -v "$PWD/playwright-report:/app/playwright-report" \
+  -v "$PWD/test-results:/app/test-results" \
+  playwright-framework
+
+# Offline checks and test discovery (no tests run)
+docker run --rm playwright-framework sh -c "npm run typecheck && npm run lint && npm run format:check"
+docker run --rm playwright-framework npx playwright test --list
+```
+
+`--ipc=host` gives Chromium (used by the nested report-scanner runs) enough shared memory, and `--init` reaps its child processes. Open the mounted report on the host with `npm run report`. Reports produced in Docker carry no commit details: `.git/` is excluded, and Playwright reads them from Git or a CI environment only. The commands under "Commands" that contact `BASE_URL` work the same way inside the container, with the same consequences; they are deliberately not listed here.
+
 ## Continuous integration
 
 | Workflow | Trigger | Runs |

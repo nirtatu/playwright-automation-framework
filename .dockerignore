@@ -1,0 +1,15 @@
+# Installed in the image by npm ci.
+node_modules/
+
+# Generated output; mount these directories at run time to keep them on the host.
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+
+# Never copied into the image.
+.env
+.env.*
+.git/
+
+.DS_Store
