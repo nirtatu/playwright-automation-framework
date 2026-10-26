@@ -5,6 +5,50 @@ import tseslint from 'typescript-eslint';
 
 const OFFLINE_MESSAGE = 'Unit-tested code must not depend on HTTP clients, fixtures or environment config.';
 
+// A page-level route handler runs before the UI write guard's context route. route.continue()
+// marks the request handled and sends it to the network, so the guard never sees it; route.fetch()
+// sends it through Playwright's Node-side request client, which browser routing never sees.
+// Reported by the object's type (Playwright's Route), so renamed variables are covered and
+// unrelated .continue() / .fetch() calls are not. Needs the type information enabled below.
+const noRouteGuardBypass = {
+  meta: {
+    type: 'problem',
+    schema: [],
+    messages: {
+      bypass:
+        'route.{{name}}() bypasses the UI write guard (the request is sent without the guard seeing it): use route.fallback() or route.fulfill().',
+    },
+  },
+  create(context) {
+    const services = context.sourceCode.parserServices;
+    if (!services?.program || !services.esTreeNodeToTSNodeMap) {
+      throw new Error('local/no-route-guard-bypass needs type information (parserOptions.projectService)');
+    }
+    const checker = services.program.getTypeChecker();
+    const isPlaywrightRoute = (node) => {
+      const symbol = checker.getTypeAtLocation(services.esTreeNodeToTSNodeMap.get(node)).getSymbol();
+      return (
+        symbol?.getName() === 'Route' &&
+        (symbol.getDeclarations() ?? []).some((d) =>
+          /[\\/]playwright-core[\\/]types[\\/]/.test(d.getSourceFile().fileName),
+        )
+      );
+    };
+    return {
+      MemberExpression(node) {
+        const name = node.computed
+          ? node.property.type === 'Literal'
+            ? node.property.value
+            : undefined
+          : node.property.name;
+        if ((name === 'continue' || name === 'fetch') && isPlaywrightRoute(node.object)) {
+          context.report({ node, messageId: 'bypass', data: { name } });
+        }
+      },
+    };
+  },
+};
+
 export default defineConfig(
   { ignores: ['node_modules/', 'playwright-report/', 'test-results/', 'blob-report/'] },
   js.configs.recommended,
@@ -93,6 +137,13 @@ export default defineConfig(
         },
       ],
     },
+  },
+  // UI code (specs, UI helpers, page objects) must not let a route handler send a request past the
+  // UI write guard.
+  {
+    files: ['tests/ui/**/*.ts', 'src/ui/**/*.ts', 'src/pages/**/*.ts'],
+    plugins: { local: { rules: { 'no-route-guard-bypass': noRouteGuardBypass } } },
+    rules: { 'local/no-route-guard-bypass': 'error' },
   },
   {
     files: ['tests/unit/**/*.ts'],
