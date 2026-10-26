@@ -122,11 +122,23 @@ export async function readRoomsList(response: Response): Promise<Room[]> {
 }
 
 /**
- * Answers the page's GET /api/room with `rooms`, before it reaches the network. Other methods fall
- * through to the write guard. Returns a counter of answered requests, so a test can prove the mock
- * was used rather than silently rendering live data.
+ * Answers the page's GET /api/room with `rooms` (status 200), before it reaches the network. Other
+ * methods fall through to the write guard. Returns a counter of answered requests, so a test can prove
+ * the mock was used rather than silently rendering live data.
  */
 export async function mockRoomsList(page: Page, rooms: unknown[]): Promise<{ fulfilled: number }> {
+  return mockRoomsListResponse(page, { status: 200, json: { rooms } });
+}
+
+/**
+ * Answers the page's GET /api/room with `status` and the JSON body `json`, before it reaches the
+ * network; for failure and empty states (e.g. the site's failure shape, 500 with `[]`). Other methods
+ * fall through to the write guard. Returns a counter of answered requests.
+ */
+export async function mockRoomsListResponse(
+  page: Page,
+  response: { status: number; json: unknown },
+): Promise<{ fulfilled: number }> {
   const counter = { fulfilled: 0 };
   // A page route takes precedence over the write guard's context route.
   await page.route(isRoomsList, async (route) => {
@@ -135,7 +147,7 @@ export async function mockRoomsList(page: Page, rooms: unknown[]): Promise<{ ful
       return;
     }
     counter.fulfilled += 1;
-    await route.fulfill({ json: { rooms } });
+    await route.fulfill({ status: response.status, json: response.json });
   });
   return counter;
 }
