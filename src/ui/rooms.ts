@@ -45,9 +45,9 @@ export const EXTERNAL_IMAGE_HOST = 'external-images.example';
 /** The room in MANY_MOCK_ROOMS whose image is on EXTERNAL_IMAGE_HOST. */
 export const EXTERNAL_IMAGE_ROOM_ID = 922;
 
-// More than three rooms, with the external-image room second. On the live site a fourth room with an
-// external image was not rendered; this order tells the possible rules apart: all five rendered, only
-// the first three (922 included), or every room except 922.
+// More than three rooms, with the external-image room second. The page renders only the first three
+// rooms of the response (the shipped code renders `rooms.slice(0, 3)`), so 921, 922 and 923 are shown,
+// 922 with its external image.
 export const MANY_MOCK_ROOMS = [
   { ...MOCK_ROOMS[0], roomid: 921, roomName: '921', type: 'Single', roomPrice: 121 },
   {
@@ -70,14 +70,14 @@ const PIXEL_PNG = Buffer.from(
 );
 
 /**
- * Answers image requests to EXTERNAL_IMAGE_HOST with a valid image, so tests do not depend on an
- * external host being reachable. Returns a counter of answered requests (the page may load images
- * lazily, so it can stay 0).
+ * Answers image requests to `host` (EXTERNAL_IMAGE_HOST by default) with a valid image, so tests do
+ * not depend on an external host being reachable; also used for map tiles. Returns a counter of
+ * answered requests (the page may load images lazily, so it can stay 0).
  */
-export async function mockExternalImages(page: Page): Promise<{ fulfilled: number }> {
+export async function mockExternalImages(page: Page, host = EXTERNAL_IMAGE_HOST): Promise<{ fulfilled: number }> {
   const counter = { fulfilled: 0 };
   await page.route(
-    (url) => url.hostname === EXTERNAL_IMAGE_HOST,
+    (url) => url.hostname === host,
     async (route) => {
       counter.fulfilled += 1;
       await route.fulfill({ contentType: 'image/png', body: PIXEL_PNG });

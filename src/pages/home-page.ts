@@ -23,8 +23,15 @@ export class HomePage {
   readonly roomsHeading: Locator;
   readonly bookNowLinks: Locator;
   readonly roomCards: Locator;
+  readonly hero: Locator;
+  readonly location: Locator;
 
   constructor(private readonly page: Page) {
+    // The hero banner (name and description from the branding response) and the location section
+    // (contact details and directions). The footer repeats some contact details, so specs scope to
+    // these sections.
+    this.hero = page.locator('section.hero');
+    this.location = page.locator('#location');
     // Scoped to `#rooms` (the navbar's own anchor): the hero banner also has a "Book Now" link, and
     // role-name matching is case-insensitive.
     this.roomsSection = page.locator('#rooms');
@@ -36,6 +43,16 @@ export class HomePage {
 
   async goto(): Promise<void> {
     await this.page.goto('/');
+  }
+
+  /**
+   * The "Book now" link of the room card whose title (h5 heading) is exactly `type`. Finds the card by
+   * what it displays, not by its link, so a spec can check that the link belongs to that room.
+   */
+  bookNowLinkForRoom(type: string): Locator {
+    return this.roomCards
+      .filter({ has: this.page.getByRole('heading', { level: 5, name: type, exact: true }) })
+      .getByRole('link', { name: 'Book now' });
   }
 
   /**
