@@ -3,7 +3,16 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { redact } from '../../src/security/redaction';
-import { embedded, kv, PNG, withEndField, writeReport, zip } from './support/report-builders';
+import {
+  embedded,
+  embeddedBase64,
+  kv,
+  PNG,
+  withEndField,
+  writeIndex,
+  writeReport,
+  zip,
+} from './support/report-builders';
 
 // Offline tests for the pre-publication report scanner (scripts/report-scan.ts and its CLI,
 // scripts/report-scan-cli.ts). Nothing is fetched. Two kinds of fixtures are used:
@@ -50,6 +59,14 @@ function runCli(script: string, args: string[]) {
   const run = runNode(['--experimental-strip-types', '--no-warnings', script, ...args], CLI_TIMEOUT_MS);
   expect(run.timedOut, `scanner CLI ${describeFailure(run, CLI_TIMEOUT_MS)}`).toBe(false);
   return { code: run.code, output: run.output };
+}
+
+/** Runs the scanner's main() in this process and returns its exit code and printed lines. */
+async function runMain(...args: string[]) {
+  const { main } = await load();
+  const lines: string[] = [];
+  const code = main(args, (line) => lines.push(line));
+  return { code, output: lines.join('\n') };
 }
 
 test.describe('scanText: supported credential patterns', () => {
@@ -308,16 +325,16 @@ test.describe('readZip: every byte must be accounted for (synthetic archives)', 
   });
 
   test('turns appended data in a report attachment into a scan error', async ({}, testInfo) => {
-    const { main } = await load();
     const dir = writeReport(
       testInfo.outputPath('report'),
       { 'a.json': '{}' },
       { 'data/trace.zip': Buffer.concat([clean(), Buffer.from(kv('token', SECRET))]) },
     );
-    const lines: string[] = [];
 
-    expect(main([dir], (line) => lines.push(line))).toBe(2);
-    expect(lines.join('\n')).not.toContain(SECRET);
+    const { code, output } = await runMain(dir);
+
+    expect(code).toBe(2);
+    expect(output).not.toContain(SECRET);
   });
 });
 
@@ -338,17 +355,17 @@ test.describe('deflate streams must fill the whole entry (synthetic archives)', 
   });
 
   test('rejects credential bytes after the deflate stream without printing them', async ({}, testInfo) => {
-    const { main } = await load();
     const dir = writeReport(
       testInfo.outputPath('report'),
       { 'a.json': '{}' },
       { 'data/trace.zip': zip({ 'trace.network': '{}' }, { afterStream: Buffer.from(kv('token', SECRET)) }) },
     );
-    const lines: string[] = [];
 
-    expect(main([dir], (line) => lines.push(line))).toBe(2);
-    expect(lines.join('\n')).toContain('unexpected data after a compressed ZIP entry');
-    expect(lines.join('\n')).not.toContain(SECRET);
+    const { code, output } = await runMain(dir);
+
+    expect(code).toBe(2);
+    expect(output).toContain('unexpected data after a compressed ZIP entry');
+    expect(output).not.toContain(SECRET);
   });
 });
 
@@ -356,21 +373,20 @@ test.describe('file and entry names are scanned and never printed unsafely (synt
   const credentialName = `${'token'}=${SECRET}.txt`;
 
   test('flags a credential in an entry name with harmless content, without printing it', async ({}, testInfo) => {
-    const { main } = await load();
     const dir = writeReport(
       testInfo.outputPath('report'),
       { 'a.json': '{}' },
       { 'data/trace.zip': zip({ [credentialName]: 'harmless' }) },
     );
-    const lines: string[] = [];
 
-    expect(main([dir], (line) => lines.push(line))).toBe(1);
-    expect(lines.join('\n')).toContain('found token-parameter (1 match) in data/trace.zip > entry #1 (name)');
-    expect(lines.join('\n')).not.toContain(SECRET);
+    const { code, output } = await runMain(dir);
+
+    expect(code).toBe(1);
+    expect(output).toContain('found token-parameter (1 match) in data/trace.zip > entry #1 (name)');
+    expect(output).not.toContain(SECRET);
   });
 
   test('labels unsafe names by position in content findings and in scan errors', async ({}, testInfo) => {
-    const { main } = await load();
     const prefixedZip = Buffer.concat([Buffer.from('prefix'), zip({ 'a.txt': 'alpha' })]);
     const finding = writeReport(
       testInfo.outputPath('finding'),
@@ -387,19 +403,19 @@ test.describe('file and entry names are scanned and never printed unsafely (synt
       { 'a.json': '{}' },
       { [`data/${credentialName}`]: 'x' },
     );
-    const findingLines: string[] = [];
-    const errorLines: string[] = [];
-    const topLevelLines: string[] = [];
 
-    expect(main([finding], (line) => findingLines.push(line))).toBe(1);
-    expect(main([error], (line) => errorLines.push(line))).toBe(2);
-    expect(main([topLevel], (line) => topLevelLines.push(line))).toBe(1);
+    const findingRun = await runMain(finding);
+    const errorRun = await runMain(error);
+    const topLevelRun = await runMain(topLevel);
 
-    expect(findingLines.join('\n')).toContain('found credential-header (1 match) in data/trace.zip > entry #2 (name)');
-    expect(findingLines.join('\n')).toContain('found json-credential (1 match) in data/trace.zip > entry #2\n');
-    expect(errorLines.join('\n')).toContain('unrecognised ZIP data in data/trace.zip > entry #1');
-    expect(topLevelLines.join('\n')).toContain('found token-parameter (1 match) in report file #1 (name)');
-    expect([...findingLines, ...errorLines, ...topLevelLines].join('\n')).not.toContain(SECRET);
+    expect(findingRun.code).toBe(1);
+    expect(errorRun.code).toBe(2);
+    expect(topLevelRun.code).toBe(1);
+    expect(findingRun.output).toContain('found credential-header (1 match) in data/trace.zip > entry #2 (name)');
+    expect(findingRun.output).toContain('found json-credential (1 match) in data/trace.zip > entry #2\n');
+    expect(errorRun.output).toContain('unrecognised ZIP data in data/trace.zip > entry #1');
+    expect(topLevelRun.output).toContain('found token-parameter (1 match) in report file #1 (name)');
+    expect([findingRun.output, errorRun.output, topLevelRun.output].join('\n')).not.toContain(SECRET);
   });
 
   test('keeps ordinary names in locations and labels other names by position', async ({}, testInfo) => {
@@ -423,16 +439,6 @@ test.describe('file and entry names are scanned and never printed unsafely (synt
 });
 
 test.describe('embedded report data must be canonical Base64', () => {
-  /** Writes an index.html whose report-data template holds exactly `blob`. */
-  function writeIndex(dir: string, blob: string) {
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(
-      join(dir, 'index.html'),
-      `<html><template id="playwrightReportBase64">data:application/zip;base64,${blob}</template></html>`,
-    );
-    return dir;
-  }
-
   test('computes the exact decoded length of canonical Base64', async () => {
     const { canonicalBase64Length } = await load();
 
@@ -460,7 +466,6 @@ test.describe('embedded report data must be canonical Base64', () => {
   });
 
   test('a report with malformed embedded data fails without revealing it', async ({}, testInfo) => {
-    const { main } = await load();
     const valid = writeReport(testInfo.outputPath('valid'), { 'report.json': '{}' });
     const cases = {
       'padding in the middle': `${SECRET}A==QUJD`,
@@ -468,20 +473,19 @@ test.describe('embedded report data must be canonical Base64', () => {
       'invalid length': SECRET,
     };
 
-    expect(main([valid], () => {})).toBe(0);
+    expect((await runMain(valid)).code).toBe(0);
     for (const [name, blob] of Object.entries(cases)) {
-      const lines: string[] = [];
-      expect(
-        main([writeIndex(testInfo.outputPath(name.replace(/\W+/g, '-')), blob)], (line) => lines.push(line)),
-        name,
-      ).toBe(2);
-      expect(lines.join('\n'), name).toContain('malformed embedded report data in index.html');
-      expect(lines.join('\n'), name).not.toContain(SECRET);
+      const { code, output } = await runMain(
+        writeIndex(testInfo.outputPath(name.replace(/\W+/g, '-')), embeddedBase64(blob)),
+      );
+      expect(code, name).toBe(2);
+      expect(output, name).toContain('malformed embedded report data in index.html');
+      expect(output, name).not.toContain(SECRET);
     }
     // Data that does not run up to the closing tag is not accepted as report data at all.
-    const split: string[] = [];
-    expect(main([writeIndex(testInfo.outputPath('split'), 'QUJD QUJD')], (line) => split.push(line))).toBe(2);
-    expect(split.join('\n')).toContain('no embedded report data found in index.html');
+    const split = await runMain(writeIndex(testInfo.outputPath('split'), embeddedBase64('QUJD QUJD')));
+    expect(split.code).toBe(2);
+    expect(split.output).toContain('no embedded report data found in index.html');
   });
 });
 
@@ -607,14 +611,10 @@ test.describe('scanReport (synthetic reports)', () => {
       await test.step('Arrange: build unreadable and ambiguous reports', () => {
         const noIndex = testInfo.outputPath('no-index');
         mkdirSync(noIndex, { recursive: true });
-        const noData = testInfo.outputPath('no-data');
-        mkdirSync(noData, { recursive: true });
-        writeFileSync(join(noData, 'index.html'), '<html>no embedded data</html>');
-        const twoBlobs = testInfo.outputPath('two-blobs');
-        mkdirSync(twoBlobs, { recursive: true });
-        writeFileSync(
-          join(twoBlobs, 'index.html'),
-          `<html>${embedded({ 'a.json': '{}' })}${embedded({ 'b.json': '{}' })}</html>`,
+        const noData = writeIndex(testInfo.outputPath('no-data'), 'no embedded data');
+        const twoBlobs = writeIndex(
+          testInfo.outputPath('two-blobs'),
+          `${embedded({ 'a.json': '{}' })}${embedded({ 'b.json': '{}' })}`,
         );
         const corruptData = writeReport(
           testInfo.outputPath('corrupt'),
@@ -698,20 +698,17 @@ test.describe('scanReport (synthetic reports)', () => {
 
 test.describe('main: exit codes and diagnostics', () => {
   test('reports findings without ever printing the matched value', async ({}, testInfo) => {
-    const { main } = await load();
     const dir = writeReport(testInfo.outputPath('report'), { 'test.json': kv('password', SECRET) });
-    const lines: string[] = [];
 
-    const code = main([dir], (line) => lines.push(line));
+    const { code, output } = await runMain(dir);
 
     expect(code).toBe(1);
-    expect(lines.join('\n')).toContain('found json-credential (1 match) in index.html (report data) > test.json');
-    expect(lines.join('\n')).not.toContain(SECRET);
-    expect(lines.join('\n')).not.toContain(SECRET.slice(0, 4));
+    expect(output).toContain('found json-credential (1 match) in index.html (report data) > test.json');
+    expect(output).not.toContain(SECRET);
+    expect(output).not.toContain(SECRET.slice(0, 4));
   });
 
   test('fails closed with exit code 2 and no content on scan errors', async ({}, testInfo) => {
-    const { main } = await load();
     const dir = writeReport(
       testInfo.outputPath('report'),
       { 'a.json': '{}' },
@@ -719,19 +716,19 @@ test.describe('main: exit codes and diagnostics', () => {
         'data/broken.zip': zip({ 'secret.txt': SECRET }, { method: 0 }).subarray(0, 50),
       },
     );
-    const lines: string[] = [];
 
-    expect(main([dir], (line) => lines.push(line))).toBe(2);
-    expect(lines.join('\n')).toContain('FAILED, not safe to publish');
-    expect(lines.join('\n')).not.toContain(SECRET);
-    expect(main([], (line) => lines.push(line))).toBe(2);
+    const { code, output } = await runMain(dir);
+
+    expect(code).toBe(2);
+    expect(output).toContain('FAILED, not safe to publish');
+    expect(output).not.toContain(SECRET);
+    expect((await runMain()).code).toBe(2);
   });
 
   test('exits 0 for a clean report', async ({}, testInfo) => {
-    const { main } = await load();
     const dir = writeReport(testInfo.outputPath('report'), { 'report.json': '{"stats":{"expected":1}}' });
 
-    expect(main([dir], () => {})).toBe(0);
+    expect((await runMain(dir)).code).toBe(0);
   });
 });
 
@@ -775,13 +772,14 @@ test.describe('child process helpers', () => {
     // The child prints a fake credential, then waits far longer than the timeout.
     const script = `console.log(${JSON.stringify(kv('token', SECRET))}); setTimeout(() => {}, 60_000);`;
 
-    const run = runNode(['-e', script], 3_000);
+    // Long enough for node to start and print; the test checks the kill, not the duration.
+    const run = runNode(['-e', script], 1_000);
 
     expect(run.timedOut).toBe(true);
     expect(run.code).toBeNull();
     expect(run.output).toContain(SECRET); // captured, so the masking below is meaningful
-    expect(describeFailure(run, 3_000)).toContain('timed out after 3000 ms');
-    expect(describeFailure(run, 3_000)).not.toContain(SECRET);
+    expect(describeFailure(run, 1_000)).toContain('timed out after 1000 ms');
+    expect(describeFailure(run, 1_000)).not.toContain(SECRET);
   });
 
   test('a failing child is reported with its exit status', () => {
@@ -822,13 +820,12 @@ test('renders a local page', async ({ page }, testInfo) => {
     );
     writeFileSync(join(dir, 'fixture.spec.ts'), spec);
     // Minimal environment, so the nested run does not inherit this worker's test state. The browsers
-    // location is passed through when it is set (the official Playwright Docker image points it at its
-    // preinstalled browsers), so the nested run uses the same browsers as this one.
-    const browsersPath = process.env.PLAYWRIGHT_BROWSERS_PATH;
+    // location is passed through (the official Playwright Docker image points it at its preinstalled
+    // browsers), so the nested run uses the same browsers as this one; spawn drops it when unset.
     const run = runNode([PLAYWRIGHT_CLI, 'test', '--config', join(dir, 'fixture.config.ts')], NESTED_RUN_TIMEOUT_MS, {
       PATH: process.env.PATH ?? '',
       HOME: process.env.HOME ?? '',
-      ...(browsersPath === undefined ? {} : { PLAYWRIGHT_BROWSERS_PATH: browsersPath }),
+      PLAYWRIGHT_BROWSERS_PATH: process.env.PLAYWRIGHT_BROWSERS_PATH,
       FIXTURE_BODY: attachmentBody,
     });
     expect(

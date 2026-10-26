@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { expectStatus, send, TransportError } from '../../src/api/http';
+import { expectStatus, send, TransportError, type StatusResponse } from '../../src/api/http';
 
 // Offline tests for the redaction wiring in src/api/http.ts. No request is sent: send() gets a
 // rejected promise, and expectStatus() gets a fake response object.
@@ -20,14 +20,12 @@ function playwrightStyleError(): Error {
   return error;
 }
 
-type FakeResponse = Parameters<typeof expectStatus>[0];
-
-function fakeResponse(status: number, body: string): FakeResponse {
+function fakeResponse(status: number, body: string): StatusResponse {
   return {
     status: () => status,
     text: async () => body,
     url: () => 'https://example.test/api/auth/login',
-  } as unknown as FakeResponse;
+  };
 }
 
 async function failureOf(promise: Promise<unknown>): Promise<Error> {
@@ -90,14 +88,14 @@ test.describe('expectStatus() body excerpt', () => {
 
   test('passes without reading the body when the status matches', async () => {
     let bodyRead = false;
-    const response = {
+    const response: StatusResponse = {
       status: () => 200,
       text: async () => {
         bodyRead = true;
         return '';
       },
       url: () => 'https://example.test/x',
-    } as unknown as FakeResponse;
+    };
 
     await expectStatus(response, 200);
 
