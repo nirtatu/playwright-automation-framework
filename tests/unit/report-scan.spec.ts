@@ -821,10 +821,14 @@ test('renders a local page', async ({ page }, testInfo) => {
         reporter: [['html', { outputFolder: './report', open: 'never' }]] };\n`,
     );
     writeFileSync(join(dir, 'fixture.spec.ts'), spec);
-    // Minimal environment, so the nested run does not inherit this worker's test state.
+    // Minimal environment, so the nested run does not inherit this worker's test state. The browsers
+    // location is passed through when it is set (the official Playwright Docker image points it at its
+    // preinstalled browsers), so the nested run uses the same browsers as this one.
+    const browsersPath = process.env.PLAYWRIGHT_BROWSERS_PATH;
     const run = runNode([PLAYWRIGHT_CLI, 'test', '--config', join(dir, 'fixture.config.ts')], NESTED_RUN_TIMEOUT_MS, {
       PATH: process.env.PATH ?? '',
       HOME: process.env.HOME ?? '',
+      ...(browsersPath === undefined ? {} : { PLAYWRIGHT_BROWSERS_PATH: browsersPath }),
       FIXTURE_BODY: attachmentBody,
     });
     expect(
