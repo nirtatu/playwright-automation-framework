@@ -161,6 +161,20 @@ test.describe('ownership-checked delete', () => {
 
     expect(warnings).toEqual([`#7 (${MARKER}): [transport] GET /api/booking/7: socket hang up; deletion unconfirmed`]);
   });
+
+  test('redacts credentials that an error message quotes from a response body', async () => {
+    const client = new FakeClient({
+      get: () => {
+        throw new SyntaxError('Unexpected token in JSON at position 30: {"token":"s3cr3tToken","x":');
+      },
+    });
+
+    const warnings = await createAndCleanUp(client);
+
+    expect(warnings).toEqual([
+      `#7 (${MARKER}): Unexpected token in JSON at position 30: {"token":"<redacted>","x":; deletion unconfirmed`,
+    ]);
+  });
 });
 
 test.describe('bounded re-login', () => {

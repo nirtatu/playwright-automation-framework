@@ -1,10 +1,11 @@
 import type { Booking, CreatedBooking } from '../data/booking-data';
+import { redact } from '../security/redaction';
 
 // Best-effort tracking and cleanup of bookings created by a test. Dependencies are injected so
 // the safety rules can be unit-tested offline; Playwright's APIResponse and BookingApi satisfy
 // these interfaces as they are.
 // Cleanup never throws: a cleanup problem must not fail a passing test or hide the original
-// failure. Every problem is reported through `warn`.
+// failure. Every problem is reported through `warn`, already redacted.
 
 /** The parts of an HTTP response that tracking and cleanup read. */
 export interface CleanupResponse {
@@ -116,7 +117,9 @@ export function createBookingTracker<R extends CleanupResponse>({
         inFlightWaitMs,
       );
       ambiguous.push(...pending);
-      await cleanUpAll(new CleanupSession(client, token), tracked, ambiguous, warn);
+      // Redacted once here, so every output (annotation, console line, job summary) gets the same
+      // safe text. Messages can quote response bodies, e.g. in JSON parse errors.
+      await cleanUpAll(new CleanupSession(client, token), tracked, ambiguous, (message) => warn(redact(message)));
     },
   };
 }
