@@ -17,26 +17,34 @@ const TOMORROW = '2030-03-16';
 
 test.describe('Reservation links (mocked rooms API, fixed clock)', { tag: '@mock' }, () => {
   test('links each mocked room to its reservation page with today and tomorrow as default dates', async ({ page }) => {
-    // Before navigation, so the page sees the fixed date from its first script.
-    await page.clock.setFixedTime(FIXED_NOW);
-    const mock = await mockRoomsList(page, MOCK_ROOMS);
     const home = new HomePage(page);
-    const roomsResponse = page.waitForResponse(isRoomsListResponse);
-    await home.goto();
-    await roomsResponse;
-    expect(mock.fulfilled, 'the page requested GET /api/room and the mock answered it').toBeGreaterThanOrEqual(1);
 
-    await expect(home.roomCards, 'one card per mocked room').toHaveCount(MOCK_ROOMS.length);
+    const mock = await test.step('Arrange: fix the clock and mock the rooms list', async () => {
+      // Before navigation, so the page sees the fixed date from its first script.
+      await page.clock.setFixedTime(FIXED_NOW);
+      return mockRoomsList(page, MOCK_ROOMS);
+    });
 
-    // Each card, found by the room type it displays (unique in MOCK_ROOMS), links to exactly that room's
-    // reservation page on this site, with today and tomorrow as the default dates. The href is the
-    // relative path the page builds, so a link to another host, another room, other dates or extra query
-    // parameters fails here.
-    for (const room of MOCK_ROOMS) {
-      await expect(
-        home.bookNowLinkForRoom(room.type),
-        `the "${room.type}" card links to room ${room.roomid}'s reservation page`,
-      ).toHaveAttribute('href', `/reservation/${room.roomid}?checkin=${TODAY}&checkout=${TOMORROW}`);
-    }
+    await test.step('Act: open the home page', async () => {
+      const roomsResponse = page.waitForResponse(isRoomsListResponse);
+      await home.goto();
+      await roomsResponse;
+    });
+
+    await test.step("Verify: each card links to its own room's reservation page", async () => {
+      expect(mock.fulfilled, 'the page requested GET /api/room and the mock answered it').toBeGreaterThanOrEqual(1);
+      await expect(home.roomCards, 'one card per mocked room').toHaveCount(MOCK_ROOMS.length);
+
+      // Each card, found by the room type it displays (unique in MOCK_ROOMS), links to exactly that
+      // room's reservation page on this site, with today and tomorrow as the default dates. The href is
+      // the relative path the page builds, so a link to another host, another room, other dates or extra
+      // query parameters fails here.
+      for (const room of MOCK_ROOMS) {
+        await expect(
+          home.bookNowLinkForRoom(room.type),
+          `the "${room.type}" card links to room ${room.roomid}'s reservation page`,
+        ).toHaveAttribute('href', `/reservation/${room.roomid}?checkin=${TODAY}&checkout=${TOMORROW}`);
+      }
+    });
   });
 });

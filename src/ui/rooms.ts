@@ -1,7 +1,9 @@
-import type { Page, Response } from '@playwright/test';
+import { expect, type Page, type Response } from '@playwright/test';
+import type { Room } from '../api/room-api';
+import { redact } from '../security/redaction';
 
-// Rooms list helpers for UI tests: the endpoint matcher (live and mocked specs) and the deterministic
-// mock (`@mock` specs).
+// Rooms list helpers for UI tests: the endpoint matcher and response reader (live and mocked specs)
+// and the deterministic mock (`@mock` specs).
 
 // Deterministic rooms for `@mock` UI tests. Ids and prices differ from the live data, so a pass shows
 // the cards were rendered from this mock. The extra fields follow the rooms API shape, so the page has
@@ -92,6 +94,32 @@ export const isRoomsList = (url: URL) => url.pathname === '/api/room';
 /** True for the page's GET /api/room response, mocked or live. For `page.waitForResponse`. */
 export const isRoomsListResponse = (response: Response) =>
   response.request().method() === 'GET' && isRoomsList(new URL(response.url()));
+
+/** How failure messages name the rooms list endpoint. */
+export const ROOMS_LIST_ENDPOINT = 'GET /api/room';
+
+/** The `rooms` array of a GET /api/room response the page received, with failures that name the endpoint. */
+export async function readRoomsList(response: Response): Promise<Room[]> {
+  let text: string;
+  try {
+    text = await response.text();
+  } catch {
+    // The read error is not kept: the message names the endpoint.
+    throw new Error(`[contract] ${ROOMS_LIST_ENDPOINT}: response body could not be read`);
+  }
+  let body: unknown;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    // The parse error is not kept: it can quote the raw body. A redacted excerpt replaces it, truncated
+    // before redaction as in expectStatus.
+    const excerpt = text === '' ? '<empty body>' : redact(text.slice(0, 200));
+    throw new Error(`[contract] ${ROOMS_LIST_ENDPOINT}: response body is not valid JSON. Body: ${excerpt}`);
+  }
+  const rooms = (body as { rooms?: unknown } | null)?.rooms;
+  expect(Array.isArray(rooms), `[contract] ${ROOMS_LIST_ENDPOINT}: response body has a "rooms" array`).toBe(true);
+  return rooms as Room[];
+}
 
 /**
  * Answers the page's GET /api/room with `rooms`, before it reaches the network. Other methods fall

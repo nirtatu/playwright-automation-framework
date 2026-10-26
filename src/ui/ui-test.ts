@@ -5,7 +5,8 @@ import { blockApiWrites } from './api-write-guard';
  * Playwright `test` for UI specs. Every test that imports it automatically gets:
  * - service workers blocked, because requests a service worker handles would bypass the guard;
  * - the API write guard (`blockApiWrites`) on its browser context, installed before the test body runs;
- * - uncaught page errors (`pageerror`) recorded;
+ * - uncaught page errors recorded from every page in that browser context, popups included (the
+ *   context's `weberror` event);
  * - at teardown, one assertion that no API write was blocked and no page error occurred, reporting both
  *   lists. It runs even when the test itself has failed.
  *
@@ -20,7 +21,7 @@ export const test = base.extend<{ uiSafety: void }>({
     async ({ page }, use) => {
       const blockedWrites = await blockApiWrites(page);
       const pageErrors: string[] = [];
-      page.on('pageerror', (error) => pageErrors.push(error.message));
+      page.context().on('weberror', (webError) => pageErrors.push(webError.error().message));
 
       await use();
 

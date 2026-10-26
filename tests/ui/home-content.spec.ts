@@ -24,48 +24,62 @@ function recordApiRequests(page: Page): string[] {
 
 test.describe('Home page content (mocked branding API)', { tag: '@mock' }, () => {
   test('renders the hero and location details from the branding response', async ({ page, baseURL }, testInfo) => {
-    // Everything is registered before navigation: the page fetches branding, then rooms, once loaded.
-    const apiRequests = recordApiRequests(page);
-    const branding = await mockBranding(page, MOCK_BRANDING, baseURL);
-    const rooms = await mockRoomsList(page, MOCK_ROOMS);
-    // MOCK_ROOMS use same-site images, so the only request to the reserved image host is the logo.
-    const logo = await mockExternalImages(page);
-    const tiles = await mockExternalImages(page, MAP_TILE_HOST);
     const home = new HomePage(page);
-    // The rooms are requested only after the branding has rendered the page.
-    const roomsResponse = page.waitForResponse(isRoomsListResponse);
-    await home.goto();
-    await roomsResponse;
-    expect(branding.fulfilled, 'the page requested GET /api/branding and the mock answered it').toBeGreaterThanOrEqual(
-      1,
-    );
-    expect(rooms.fulfilled, 'the page requested GET /api/room and the mock answered it').toBeGreaterThanOrEqual(1);
 
-    await expect(home.hero.getByRole('heading', { level: 1 }), 'the hero greets with the branding name').toHaveText(
-      `Welcome to ${MOCK_BRANDING.name}`,
-    );
-    await expect(home.hero, 'the hero shows the branding description').toContainText(MOCK_BRANDING.description);
-    // The hero renders the logo as its inline CSS background image, which the browser loads once the
-    // visible hero is rendered; polled, because that request can follow the heading assertion.
-    await expect
-      .poll(() => logo.fulfilled, { message: 'the hero requested the branding logo and the mock answered it' })
-      .toBeGreaterThanOrEqual(1);
+    // Everything is registered before navigation: the page fetches branding, then rooms, once loaded.
+    const { apiRequests, branding, rooms, logo, tiles } =
+      await test.step('Arrange: record API requests and mock branding, rooms, logo and map tiles', async () => ({
+        apiRequests: recordApiRequests(page),
+        branding: await mockBranding(page, MOCK_BRANDING, baseURL),
+        rooms: await mockRoomsList(page, MOCK_ROOMS),
+        // MOCK_ROOMS use same-site images, so the only request to the reserved image host is the logo.
+        logo: await mockExternalImages(page),
+        tiles: await mockExternalImages(page, MAP_TILE_HOST),
+      }));
 
-    // Scoped to the location section: the footer repeats some of the contact details.
-    for (const value of [
-      MOCK_BRANDING.contact.phone,
-      MOCK_BRANDING.contact.email,
-      MOCK_BRANDING.address.postCode,
-      MOCK_BRANDING.directions,
-    ]) {
-      await expect(home.location, `the location section shows "${value}" from the branding`).toContainText(value);
-    }
+    await test.step('Act: open the home page', async () => {
+      // The rooms are requested only after the branding has rendered the page.
+      const roomsResponse = page.waitForResponse(isRoomsListResponse);
+      await home.goto();
+      await roomsResponse;
+    });
 
-    // Every API request was one the mocks answer, so none reached the live API.
-    expect([...new Set(apiRequests)].sort(), 'API requests sent by the page').toEqual([
-      'GET /api/branding',
-      'GET /api/room',
-    ]);
+    await test.step('Verify: the hero shows the branding name, description and logo', async () => {
+      expect(
+        branding.fulfilled,
+        'the page requested GET /api/branding and the mock answered it',
+      ).toBeGreaterThanOrEqual(1);
+      expect(rooms.fulfilled, 'the page requested GET /api/room and the mock answered it').toBeGreaterThanOrEqual(1);
+      await expect(home.hero.getByRole('heading', { level: 1 }), 'the hero greets with the branding name').toHaveText(
+        `Welcome to ${MOCK_BRANDING.name}`,
+      );
+      await expect(home.hero, 'the hero shows the branding description').toContainText(MOCK_BRANDING.description);
+      // The hero renders the logo as its inline CSS background image, which the browser loads once the
+      // visible hero is rendered; polled, because that request can follow the heading assertion.
+      await expect
+        .poll(() => logo.fulfilled, { message: 'the hero requested the branding logo and the mock answered it' })
+        .toBeGreaterThanOrEqual(1);
+    });
+
+    await test.step('Verify: the location section shows the branding contact details', async () => {
+      // Scoped to the location section: the footer repeats some of the contact details.
+      for (const value of [
+        MOCK_BRANDING.contact.phone,
+        MOCK_BRANDING.contact.email,
+        MOCK_BRANDING.address.postCode,
+        MOCK_BRANDING.directions,
+      ]) {
+        await expect(home.location, `the location section shows "${value}" from the branding`).toContainText(value);
+      }
+    });
+
+    await test.step('Verify: the page sent only the two mocked API requests', () => {
+      // Every API request was one the mocks answer, so none reached the live API.
+      expect([...new Set(apiRequests)].sort(), 'API requests sent by the page').toEqual([
+        'GET /api/branding',
+        'GET /api/room',
+      ]);
+    });
 
     // Not asserted: whether and how many map tiles load depends on the map's layout below the fold
     // and its own loading, so the count is recorded only. Any tile that is requested is answered.
