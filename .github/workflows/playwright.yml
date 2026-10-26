@@ -19,6 +19,12 @@ jobs:
     name: Type check and test
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # Official Playwright image: Chromium and its system dependencies are preinstalled, so no
+    # browser or apt install runs here. Keep the tag in sync with @playwright/test in package.json
+    # (and the Dockerfile). --ipc=host gives Chromium enough shared memory.
+    container:
+      image: mcr.microsoft.com/playwright:v1.64.1-noble
+      options: --ipc=host
     # "passed" only when the report scan ran and found nothing; empty or "blocked" otherwise.
     outputs:
       report_scan: ${{ steps.scan.outputs.result }}
@@ -37,9 +43,6 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
-
-      - name: Install Chromium and system dependencies
-        run: npx playwright install --with-deps chromium
 
       - name: Type check
         run: npm run typecheck
