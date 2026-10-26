@@ -32,11 +32,12 @@ export class HomePage {
     // these sections.
     this.hero = page.locator('section.hero');
     this.location = page.locator('#location');
-    // Scoped to `#rooms` (the navbar's own anchor): the hero banner also has a "Book Now" link, and
-    // role-name matching is case-insensitive.
+    // Scoped to `#rooms` (the navbar's own anchor), and names matched exactly (case-sensitive, whole
+    // name): the hero banner also has a "Book Now" link, and default role-name matching is
+    // case-insensitive and by substring.
     this.roomsSection = page.locator('#rooms');
-    this.roomsHeading = this.roomsSection.getByRole('heading', { name: 'Our Rooms' });
-    this.bookNowLinks = this.roomsSection.getByRole('link', { name: 'Book now' });
+    this.roomsHeading = this.roomsSection.getByRole('heading', { name: 'Our Rooms', exact: true });
+    this.bookNowLinks = this.roomsSection.getByRole('link', { name: 'Book now', exact: true });
     // The site has no test ids; `room-card` is the only class specific to a card.
     this.roomCards = this.roomsSection.locator('.room-card');
   }
@@ -52,7 +53,7 @@ export class HomePage {
   bookNowLinkForRoom(type: string): Locator {
     return this.roomCards
       .filter({ has: this.page.getByRole('heading', { level: 5, name: type, exact: true }) })
-      .getByRole('link', { name: 'Book now' });
+      .getByRole('link', { name: 'Book now', exact: true });
   }
 
   /**
@@ -104,7 +105,7 @@ async function readReservationLink(card: Locator, where: string): Promise<Reserv
 // (`/reservation/1?checkin=…`), so the id is read from the path only. The base URL is irrelevant:
 // only the path and query are used.
 async function readBookNowLink(card: Locator, where: string): Promise<{ roomid: number; url: URL }> {
-  const link = await exactlyOne(card.getByRole('link', { name: 'Book now' }), `${where}: "Book now" link`);
+  const link = await exactlyOne(card.getByRole('link', { name: 'Book now', exact: true }), `${where}: "Book now" link`);
   const href = await link.getAttribute('href');
   const url = href === null ? null : new URL(href, 'https://base.invalid');
   const id = url === null ? null : /^\/reservation\/(\d+)$/.exec(url.pathname);
