@@ -27,10 +27,20 @@ export async function send(description: string, request: () => Promise<APIRespon
 const INFRASTRUCTURE_STATUSES = new Set([502, 503, 504]);
 
 /**
+ * The parts of a response that expectStatus reads. Both an APIResponse and a browser page's Response
+ * provide them, so UI tests can check the responses their pages receive.
+ */
+export interface StatusResponse {
+  status(): number;
+  text(): Promise<string>;
+  url(): string;
+}
+
+/**
  * Asserts the status code. The failure message is labelled [infrastructure] for gateway errors
  * and [contract] for everything else, so reports show which kind of failure occurred.
  */
-export async function expectStatus(response: APIResponse, expected: number, context?: string): Promise<void> {
+export async function expectStatus(response: StatusResponse, expected: number, context?: string): Promise<void> {
   const status = response.status();
   if (status === expected) return;
   const kind = INFRASTRUCTURE_STATUSES.has(status) ? 'infrastructure' : 'contract';

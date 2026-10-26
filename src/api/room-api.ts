@@ -2,11 +2,13 @@ import type { APIRequestContext, APIResponse } from '@playwright/test';
 import { send } from './http';
 
 /**
- * One entry of `GET /api/room`, limited to the field the framework reads. The full room shape is
+ * One entry of `GET /api/room`, limited to the fields the framework reads. The full room shape is
  * asserted at runtime by tests/api/rooms.spec.ts, not declared here.
  */
 export type Room = {
   roomid: number;
+  type: string;
+  roomPrice: number;
 };
 
 // Public, read-only endpoint; no token needed. Returns the raw response (`{ rooms: Room[] }`).
