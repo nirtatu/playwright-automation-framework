@@ -87,16 +87,23 @@ test.describe('Home page', { tag: '@live' }, () => {
       });
     }
 
-    // Each card's link has YYYY-MM-DD check-in and check-out dates (validated by readReservationLinks()).
-    const links = await home.readReservationLinks();
-    expect(
-      links.map((link) => link.roomid),
-      'each card links to its own room',
-    ).toEqual(displayedIds);
+    // Each card's "Book now" link is for a room in the response and has YYYY-MM-DD check-in and
+    // check-out dates (validated by readReservationLinks()). Checked against the response, not against
+    // the cards read above: the two reads are separate DOM snapshots. (Each card's room id above is
+    // already read from its own link.)
+    for (const link of await home.readReservationLinks()) {
+      expect(
+        byId.has(link.roomid),
+        `the "Book now" link to room ${link.roomid} is for a room in the ${ROOMS_ENDPOINT} response`,
+      ).toBe(true);
+    }
 
     testInfo.annotations.push({
       type: 'observed-rendering',
-      description: `rendered ${displayed.length} of ${rooms.length} rooms from ${ROOMS_ENDPOINT}: ids ${JSON.stringify(displayedIds)} of ${JSON.stringify(ids)}`,
+      description:
+        `read once the first card was visible (the page has no render-complete signal, so this may not be ` +
+        `the complete result): ${displayed.length} of ${rooms.length} rooms from ${ROOMS_ENDPOINT} rendered, ` +
+        `ids ${JSON.stringify(displayedIds)} of ${JSON.stringify(ids)}`,
     });
   });
 });

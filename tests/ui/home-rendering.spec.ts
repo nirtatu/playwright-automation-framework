@@ -79,10 +79,9 @@ test.describe('Home page rendering (mocked rooms API)', { tag: '@mock' }, () => 
       MANY_MOCK_ROOMS.map(({ roomid, type, roomPrice }) => [roomid, { roomid, type, roomPrice }]),
     );
     for (const card of displayed) {
-      expect(
+      expect(card, `the card for room ${card.roomid} shows a mocked room's type and price`).toEqual(
         supplied.get(card.roomid),
-        `the card for room ${card.roomid} shows a mocked room's type and price`,
-      ).toEqual(card);
+      );
     }
 
     testInfo.annotations.push({
