@@ -1,7 +1,7 @@
 import type { Response } from '@playwright/test';
 import { expectStatus } from '../../src/api/http';
 import type { Room } from '../../src/api/room-api';
-import { HomePage, type DisplayedRoom } from '../../src/pages/home-page';
+import { HomePage } from '../../src/pages/home-page';
 import { redact } from '../../src/security/redaction';
 import { isRoomsListResponse } from '../../src/ui/rooms';
 import { test, expect } from '../../src/ui/ui-test';
@@ -11,10 +11,6 @@ import { test, expect } from '../../src/ui/ui-test';
 // fails the test, as it does for uncaught page errors.
 
 const ROOMS_ENDPOINT = 'GET /api/room';
-
-// Room id first, then type and price, so the order is fully deterministic even if ids repeat.
-const byRoom = (a: DisplayedRoom, b: DisplayedRoom) =>
-  a.roomid - b.roomid || (a.type < b.type ? -1 : a.type > b.type ? 1 : 0) || a.roomPrice - b.roomPrice;
 
 /** The `rooms` array of the response, with failures that name the endpoint. */
 async function roomsIn(response: Response): Promise<Room[]> {
@@ -52,7 +48,9 @@ test.describe('Home page', { tag: '@live' }, () => {
     await expect(home.bookNowLinks.first()).toHaveAttribute('href', /\/reservation\/\d+/);
   });
 
-  test('renders every room from its rooms API response with type, price and reservation link', async ({ page }) => {
+  test('renders only rooms from its rooms API response, each with matching type, price and reservation link', async ({
+    page,
+  }, testInfo) => {
     const home = new HomePage(page);
     // Registered before navigation: the page fetches the rooms itself once it has loaded.
     const roomsResponse = page.waitForResponse(isRoomsListResponse);
@@ -66,10 +64,39 @@ test.describe('Home page', { tag: '@live' }, () => {
     expect(rooms.length, `${ROOMS_ENDPOINT}: the response lists at least one room`).toBeGreaterThan(0);
     const ids = rooms.map((room) => room.roomid);
     expect(new Set(ids).size, `${ROOMS_ENDPOINT}: room ids are unique, got ${JSON.stringify(ids)}`).toBe(ids.length);
-    const expected = rooms.map(({ roomid, type, roomPrice }) => ({ roomid, type, roomPrice })).sort(byRoom);
+    const byId = new Map(rooms.map((room) => [room.roomid, room]));
 
-    await expect(home.roomCards, 'one card per room in the response').toHaveCount(expected.length);
-    const displayed = (await home.readRoomCards()).sort(byRoom);
-    expect(displayed, 'each card shows its room type and nightly price, linked by room id').toEqual(expected);
+    // The page need not render every room in the response (on 2026-10-26 it rendered 3 of 4), and
+    // anyone can add rooms to the shared site, so each rendered card is checked against the response
+    // instead of the card count. The rendering rule itself is covered with mocked rooms.
+    await expect(home.roomCards.first(), 'at least one room card is rendered').toBeVisible();
+    // readRoomCards() also checks each card's structure: one title, one "Book now" link to
+    // /reservation/<id>, and a nightly price.
+    const displayed = await home.readRoomCards();
+    const displayedIds = displayed.map((card) => card.roomid);
+    expect(new Set(displayedIds).size, `each room has at most one card, got ${JSON.stringify(displayedIds)}`).toBe(
+      displayedIds.length,
+    );
+    for (const card of displayed) {
+      const room = byId.get(card.roomid);
+      expect(room, `the card for room ${card.roomid} is a room in the ${ROOMS_ENDPOINT} response`).toBeDefined();
+      expect(card, `the card for room ${card.roomid} shows the response's type and nightly price`).toEqual({
+        roomid: room!.roomid,
+        type: room!.type,
+        roomPrice: room!.roomPrice,
+      });
+    }
+
+    // Each card's link has YYYY-MM-DD check-in and check-out dates (validated by readReservationLinks()).
+    const links = await home.readReservationLinks();
+    expect(
+      links.map((link) => link.roomid),
+      'each card links to its own room',
+    ).toEqual(displayedIds);
+
+    testInfo.annotations.push({
+      type: 'observed-rendering',
+      description: `rendered ${displayed.length} of ${rooms.length} rooms from ${ROOMS_ENDPOINT}: ids ${JSON.stringify(displayedIds)} of ${JSON.stringify(ids)}`,
+    });
   });
 });

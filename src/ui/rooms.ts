@@ -39,6 +39,53 @@ export const MOCK_ROOMS = [
   },
 ];
 
+/** Host of the external image in MANY_MOCK_ROOMS. Reserved (`.example`), and answered by mockExternalImages. */
+export const EXTERNAL_IMAGE_HOST = 'external-images.example';
+
+/** The room in MANY_MOCK_ROOMS whose image is on EXTERNAL_IMAGE_HOST. */
+export const EXTERNAL_IMAGE_ROOM_ID = 922;
+
+// More than three rooms, with the external-image room second. On the live site a fourth room with an
+// external image was not rendered; this order tells the possible rules apart: all five rendered, only
+// the first three (922 included), or every room except 922.
+export const MANY_MOCK_ROOMS = [
+  { ...MOCK_ROOMS[0], roomid: 921, roomName: '921', type: 'Single', roomPrice: 121 },
+  {
+    ...MOCK_ROOMS[1],
+    roomid: EXTERNAL_IMAGE_ROOM_ID,
+    roomName: '922',
+    type: 'Double',
+    roomPrice: 122,
+    image: `https://${EXTERNAL_IMAGE_HOST}/room2.jpg`,
+  },
+  { ...MOCK_ROOMS[2], roomid: 923, roomName: '923', type: 'Suite', roomPrice: 123 },
+  { ...MOCK_ROOMS[0], roomid: 924, roomName: '924', type: 'Family', roomPrice: 124 },
+  { ...MOCK_ROOMS[1], roomid: 925, roomName: '925', type: 'Twin', roomPrice: 125 },
+];
+
+// A 1x1 transparent PNG.
+const PIXEL_PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
+  'base64',
+);
+
+/**
+ * Answers image requests to EXTERNAL_IMAGE_HOST with a valid image, so tests do not depend on an
+ * external host being reachable. Returns a counter of answered requests (the page may load images
+ * lazily, so it can stay 0).
+ */
+export async function mockExternalImages(page: Page): Promise<{ fulfilled: number }> {
+  const counter = { fulfilled: 0 };
+  await page.route(
+    (url) => url.hostname === EXTERNAL_IMAGE_HOST,
+    async (route) => {
+      counter.fulfilled += 1;
+      await route.fulfill({ contentType: 'image/png', body: PIXEL_PNG });
+    },
+  );
+  return counter;
+}
+
 /** True for the rooms list endpoint, whatever the query string. */
 export const isRoomsList = (url: URL) => url.pathname === '/api/room';
 
