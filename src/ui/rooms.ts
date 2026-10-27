@@ -44,9 +44,6 @@ export const MOCK_ROOMS = [
 /** Host of the external image in MANY_MOCK_ROOMS. Reserved (`.example`), and answered by mockExternalImages. */
 export const EXTERNAL_IMAGE_HOST = 'external-images.example';
 
-/** The room in MANY_MOCK_ROOMS whose image is on EXTERNAL_IMAGE_HOST. */
-export const EXTERNAL_IMAGE_ROOM_ID = 922;
-
 // More than three rooms, with the external-image room second. The page renders only the first three
 // rooms of the response (the shipped code renders `rooms.slice(0, 3)`), so 921, 922 and 923 are shown,
 // 922 with its external image.
@@ -54,7 +51,7 @@ export const MANY_MOCK_ROOMS = [
   { ...MOCK_ROOMS[0], roomid: 921, roomName: '921', type: 'Single', roomPrice: 121 },
   {
     ...MOCK_ROOMS[1],
-    roomid: EXTERNAL_IMAGE_ROOM_ID,
+    roomid: 922,
     roomName: '922',
     type: 'Double',
     roomPrice: 122,

@@ -102,10 +102,10 @@ export default defineConfig(
           paths: [
             {
               name: '@playwright/test',
-              importNames: ['test', 'request'],
+              importNames: ['test', 'request', 'chromium', 'firefox', 'webkit'],
               allowTypeImports: true,
               message:
-                'Import test from src/ui/ui-test (it installs the UI write guard); request contexts bypass the guard.',
+                'Import test from src/ui/ui-test (it installs the UI write guard); request contexts and self-launched browsers bypass the guard.',
             },
           ],
           patterns: [
@@ -166,8 +166,8 @@ export default defineConfig(
       'no-restricted-syntax': [
         'error',
         {
-          selector:
-            'CallExpression[callee.name="test"] > :function > ObjectPattern > Property[key.name=/^(request|page|context|browser|playwright)$/]',
+          // Any function, so hooks (test.beforeEach etc.) are covered too, not only test bodies.
+          selector: ':function > ObjectPattern > Property[key.name=/^(request|page|context|browser|playwright)$/]',
           message: 'Unit tests must not use network- or browser-backed Playwright fixtures.',
         },
       ],
