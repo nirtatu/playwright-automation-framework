@@ -4,9 +4,10 @@ FROM mcr.microsoft.com/playwright:v1.64.1-noble
 
 WORKDIR /app
 
-# Dependencies from the lockfile only; this layer is cached until package*.json changes.
+# Dependencies from the lockfile only; this layer is cached until package*.json changes. npm's
+# download cache lives in a BuildKit cache mount, so it is reused across builds and not stored in the image.
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN --mount=type=cache,target=/root/.npm npm ci
 
 COPY . .
 

@@ -69,7 +69,7 @@ src/ui/rooms.ts                GET /api/room matcher and response reader (readRo
 src/ui/ui-test.ts              shared UI `test`: guard, service-worker blocking, page-error check
 
 src/security/redaction.ts      masks token, cookie, authorization and password values in failure
-                               messages, transport errors and the job summary
+                               messages, transport errors, cleanup warnings and the job summary
 src/reporting/                 custom reporter that writes the GitHub Actions job summary
 scripts/report-scan*.ts        scans the HTML report for credential patterns before it is published
 
@@ -205,7 +205,7 @@ Tags are filters, not runtime safety guards: they only decide which tests a comm
 
 ### Running in Docker
 
-The `Dockerfile` uses the official Playwright image for the pinned version (`mcr.microsoft.com/playwright:v1.64.1-noble`, which includes Chromium and its system dependencies) and installs the project with `npm ci`. Its default command runs only the offline unit tests. `.dockerignore` keeps `.env` files, `.git/`, `node_modules/` and generated reports out of the image.
+The `Dockerfile` uses the official Playwright image that matches the pinned `@playwright/test` version (it includes Chromium and its system dependencies) and installs the project with `npm ci`. Its default command runs only the offline unit tests. `.dockerignore` keeps `.env` files, `.git/`, `node_modules/` and generated reports out of the image.
 
 ```bash
 docker build -t playwright-framework .

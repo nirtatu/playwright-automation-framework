@@ -1,18 +1,12 @@
 import { test, expect } from '@playwright/test';
-import { addDays, findFreeWindow, type Booking, type CreatedBooking } from '../../src/data/booking-data';
+import { addDays, buildBooking, findFreeWindow, type CreatedBooking } from '../../src/data/booking-data';
 
 // Offline unit tests for src/data/booking-data.ts. `today` and `random` are injected, so the
 // free-window search is deterministic. ESLint keeps tests/unit free of HTTP clients and fixtures.
 
 // Filler for the CreatedBooking fields that stay() does not set; stay() replaces the booking id and the
 // dates, which are the only fields the free-window search reads.
-const BOOKING: Booking = {
-  roomid: 2,
-  firstname: 'Playwright',
-  lastname: 'Auto-unit-marker',
-  depositpaid: false,
-  bookingdates: { checkin: '2031-06-14', checkout: '2031-06-16' },
-};
+const BOOKING = buildBooking(2, '2031-06-14', { lastname: 'Auto-unit-marker' });
 
 test.describe('free-window selection', () => {
   const TODAY = '2026-01-01';

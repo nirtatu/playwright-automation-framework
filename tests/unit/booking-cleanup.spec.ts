@@ -5,19 +5,13 @@ import {
   type CleanupClient,
   type CleanupResponse,
 } from '../../src/cleanup/booking-cleanup';
-import type { Booking, CreatedBooking } from '../../src/data/booking-data';
+import { buildBooking, type Booking, type CreatedBooking } from '../../src/data/booking-data';
 
 // Offline unit tests: every dependency is an in-memory fake. No Playwright fixtures (request,
 // page) and no HTTP client are used anywhere in this file; ESLint enforces that for tests/unit.
 
 const MARKER = 'Auto-unit-marker';
-const BOOKING: Booking = {
-  roomid: 2,
-  firstname: 'Playwright',
-  lastname: MARKER,
-  depositpaid: false,
-  bookingdates: { checkin: '2031-06-14', checkout: '2031-06-16' },
-};
+const BOOKING = buildBooking(2, '2031-06-14', { lastname: MARKER });
 
 function res(status: number, body?: unknown): CleanupResponse {
   return {
@@ -95,16 +89,21 @@ function setUp(
   return { tracker, warnings, createCalls };
 }
 
+/** Creates BOOKING once, runs the cleanup and returns its warnings; the calls stay on `client`. */
+async function createAndCleanUp(client: FakeClient, create?: Parameters<typeof setUp>[1]) {
+  const { tracker, warnings } = setUp(client, create);
+  await tracker.create(BOOKING);
+  await tracker.cleanUp();
+  return warnings;
+}
+
 const owned = (id = 7) => res(200, { ...BOOKING, bookingid: id });
 const NOT_FOUND = res(404);
 
 test.describe('ownership-checked delete', () => {
   test('deletes a booking whose marker matches and confirms it is gone', async () => {
     const client = new FakeClient({ get: seq(owned(), NOT_FOUND), delete: seq(res(202)) });
-    const { tracker, warnings } = setUp(client);
-
-    await tracker.create(BOOKING);
-    await tracker.cleanUp();
+    const warnings = await createAndCleanUp(client);
 
     expect(client.calls).toEqual(['GET 7 [T1]', 'DELETE 7 [T1]', 'GET 7 [T1]']);
     expect(warnings).toEqual([]);
@@ -112,10 +111,7 @@ test.describe('ownership-checked delete', () => {
 
   test('never deletes a booking whose marker does not match', async () => {
     const client = new FakeClient({ get: seq(res(200, { ...BOOKING, bookingid: 7, lastname: 'Someone-Else' })) });
-    const { tracker, warnings } = setUp(client);
-
-    await tracker.create(BOOKING);
-    await tracker.cleanUp();
+    const warnings = await createAndCleanUp(client);
 
     expect(client.calls).toEqual(['GET 7 [T1]']);
     expect(warnings).toEqual([
@@ -125,10 +121,7 @@ test.describe('ownership-checked delete', () => {
 
   test('stays silent when the booking is already gone', async () => {
     const client = new FakeClient({ get: seq(NOT_FOUND) });
-    const { tracker, warnings } = setUp(client);
-
-    await tracker.create(BOOKING);
-    await tracker.cleanUp();
+    const warnings = await createAndCleanUp(client);
 
     expect(client.calls).toEqual(['GET 7 [T1]']);
     expect(warnings).toEqual([]);
@@ -140,10 +133,7 @@ test.describe('ownership-checked delete', () => {
       delete: seq(res(500)),
       validate: seq(res(200)), // token still valid, so no re-login
     });
-    const { tracker, warnings } = setUp(client);
-
-    await tracker.create(BOOKING);
-    await tracker.cleanUp();
+    const warnings = await createAndCleanUp(client);
 
     expect(client.calls).toEqual(['GET 7 [T1]', 'DELETE 7 [T1]', 'VALIDATE [T1]', 'GET 7 [T1]']);
     expect(warnings).toEqual([
@@ -153,10 +143,7 @@ test.describe('ownership-checked delete', () => {
 
   test('warns when the booking is still present after DELETE', async () => {
     const client = new FakeClient({ get: seq(owned(), owned()), delete: seq(res(202)) });
-    const { tracker, warnings } = setUp(client);
-
-    await tracker.create(BOOKING);
-    await tracker.cleanUp();
+    const warnings = await createAndCleanUp(client);
 
     expect(warnings).toEqual([`#7 (${MARKER}): DELETE returned 202, follow-up GET 200; deletion unconfirmed`]);
   });
@@ -174,6 +161,20 @@ test.describe('ownership-checked delete', () => {
 
     expect(warnings).toEqual([`#7 (${MARKER}): [transport] GET /api/booking/7: socket hang up; deletion unconfirmed`]);
   });
+
+  test('redacts credentials that an error message quotes from a response body', async () => {
+    const client = new FakeClient({
+      get: () => {
+        throw new SyntaxError('Unexpected token in JSON at position 30: {"token":"s3cr3tToken","x":');
+      },
+    });
+
+    const warnings = await createAndCleanUp(client);
+
+    expect(warnings).toEqual([
+      `#7 (${MARKER}): Unexpected token in JSON at position 30: {"token":"<redacted>","x":; deletion unconfirmed`,
+    ]);
+  });
 });
 
 test.describe('bounded re-login', () => {
@@ -184,10 +185,7 @@ test.describe('bounded re-login', () => {
       login: seq(res(200, { token: 'T2' })),
       delete: seq(res(202)),
     });
-    const { tracker, warnings } = setUp(client);
-
-    await tracker.create(BOOKING);
-    await tracker.cleanUp();
+    const warnings = await createAndCleanUp(client);
 
     expect(client.calls).toEqual(['GET 7 [T1]', 'VALIDATE [T1]', 'LOGIN', 'GET 7 [T2]', 'DELETE 7 [T2]', 'GET 7 [T2]']);
     expect(warnings).toEqual([]);
@@ -200,10 +198,7 @@ test.describe('bounded re-login', () => {
       validate: seq(res(403)),
       login: seq(res(200, { token: 'T2' })),
     });
-    const { tracker, warnings } = setUp(client);
-
-    await tracker.create(BOOKING);
-    await tracker.cleanUp();
+    const warnings = await createAndCleanUp(client);
 
     expect(client.calls).toEqual(['GET 7 [T1]', 'DELETE 7 [T1]', 'VALIDATE [T1]', 'LOGIN', 'GET 7 [T2]']);
     expect(warnings).toEqual([
@@ -235,10 +230,7 @@ test.describe('bounded re-login', () => {
 
   test('does not re-log in when the token is still valid', async () => {
     const client = new FakeClient({ get: seq(res(500)), validate: seq(res(200)) });
-    const { tracker, warnings } = setUp(client);
-
-    await tracker.create(BOOKING);
-    await tracker.cleanUp();
+    const warnings = await createAndCleanUp(client);
 
     expect(client.calls).toEqual(['GET 7 [T1]', 'VALIDATE [T1]']);
     expect(warnings).toEqual([`#7 (${MARKER}): ownership check returned 500; not deleted`]);
@@ -246,10 +238,7 @@ test.describe('bounded re-login', () => {
 
   test('does not check the token for statuses that are not auth-like', async () => {
     const client = new FakeClient({ get: seq(res(502)) });
-    const { tracker, warnings } = setUp(client);
-
-    await tracker.create(BOOKING);
-    await tracker.cleanUp();
+    const warnings = await createAndCleanUp(client);
 
     expect(client.calls).toEqual(['GET 7 [T1]']);
     expect(warnings).toEqual([`#7 (${MARKER}): ownership check returned 502; not deleted`]);
@@ -271,10 +260,7 @@ test.describe('create tracking', () => {
 
   test('ignores a definitive 4xx rejection without an id', async () => {
     const client = new FakeClient({});
-    const { tracker, warnings } = setUp(client, async () => res(409, { error: 'Failed to create booking' }));
-
-    await tracker.create(BOOKING);
-    await tracker.cleanUp();
+    const warnings = await createAndCleanUp(client, async () => res(409, { error: 'Failed to create booking' }));
 
     expect(client.calls).toEqual([]);
     expect(warnings).toEqual([]);
@@ -282,10 +268,7 @@ test.describe('create tracking', () => {
 
   test('cleans up an unexpected id even when the status is an error', async () => {
     const client = new FakeClient({ get: seq(owned(9), NOT_FOUND), delete: seq(res(202)) });
-    const { tracker, warnings } = setUp(client, async () => res(400, { bookingid: 9 }));
-
-    await tracker.create(BOOKING);
-    await tracker.cleanUp();
+    const warnings = await createAndCleanUp(client, async () => res(400, { bookingid: 9 }));
 
     expect(client.calls).toEqual(['GET 9 [T1]', 'DELETE 9 [T1]', 'GET 9 [T1]']);
     expect(warnings).toEqual([]);
@@ -326,10 +309,7 @@ test.describe('ambiguous-create recovery', () => {
 
   test('deletes nothing and warns when no booking matches the marker', async () => {
     const client = new FakeClient({ list: seq(res(200, { bookings: [match(3, 'Other')] })) });
-    const { tracker, warnings } = setUp(client, async () => res(201, {}));
-
-    await tracker.create(BOOKING);
-    await tracker.cleanUp();
+    const warnings = await createAndCleanUp(client, async () => res(201, {}));
 
     expect(client.calls).toEqual(['LIST room 2 [T1]']);
     expect(warnings).toEqual([
@@ -339,10 +319,7 @@ test.describe('ambiguous-create recovery', () => {
 
   test('deletes nothing and warns when several bookings match the marker', async () => {
     const client = new FakeClient({ list: seq(res(200, { bookings: [match(11), match(12)] })) });
-    const { tracker, warnings } = setUp(client, async () => res(500));
-
-    await tracker.create(BOOKING);
-    await tracker.cleanUp();
+    const warnings = await createAndCleanUp(client, async () => res(500));
 
     expect(client.calls).toEqual(['LIST room 2 [T1]']);
     expect(warnings).toEqual([
@@ -352,10 +329,7 @@ test.describe('ambiguous-create recovery', () => {
 
   test('treats a 500 lookup with [] as unusable, not as "no match"', async () => {
     const client = new FakeClient({ list: seq(res(500, [])), validate: seq(res(200)) });
-    const { tracker, warnings } = setUp(client, async () => res(503));
-
-    await tracker.create(BOOKING);
-    await tracker.cleanUp();
+    const warnings = await createAndCleanUp(client, async () => res(503));
 
     expect(client.calls).toEqual(['LIST room 2 [T1]', 'VALIDATE [T1]']);
     expect(warnings).toEqual([

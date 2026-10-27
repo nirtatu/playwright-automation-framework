@@ -93,8 +93,18 @@ export function withEndField(archive: Buffer, field: number, value: number, byte
   return copy;
 }
 
-export const embedded = (data: Record<string, string>) =>
-  `<template id="playwrightReportBase64">data:application/zip;base64,${zip(data).toString('base64')}</template>`;
+/** The report-data template holding exactly `base64`, which need not be valid Base64. */
+export const embeddedBase64 = (base64: string) =>
+  `<template id="playwrightReportBase64">data:application/zip;base64,${base64}</template>`;
+
+export const embedded = (data: Record<string, string>) => embeddedBase64(zip(data).toString('base64'));
+
+/** Writes `dir/index.html` with the given body markup. */
+export function writeIndex(dir: string, body: string) {
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'index.html'), `<html>${body}</html>`);
+  return dir;
+}
 
 /** Writes a synthetic report folder: index.html embedding `reportData`, plus extra files. */
 export function writeReport(
@@ -102,8 +112,7 @@ export function writeReport(
   reportData: Record<string, string>,
   files: Record<string, string | Buffer> = {},
 ) {
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, 'index.html'), `<html>${embedded(reportData)}</html>`);
+  writeIndex(dir, embedded(reportData));
   for (const [name, content] of Object.entries(files)) {
     mkdirSync(dirname(join(dir, name)), { recursive: true });
     writeFileSync(join(dir, name), content);
